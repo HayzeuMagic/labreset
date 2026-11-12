@@ -1,89 +1,83 @@
 # Lab Reset
 
-A small Windows app that resets lab VMs and files at the end of a class. Install it on each lab PC. It works only on the PC it runs on:
+A small Windows app that resets the lab VMs at the end of a class, on this PC and on the other lab PCs over the network:
 
-- extract fresh copies of the lab archives, and
-- find and delete the copies students extracted.
+- extract fresh copies of the lab VM archives, and
+- find and delete the VMs students extracted.
 
-All lab archives are stored **inside the app** (in its `Library` folder), so the teacher just ticks one and clicks Extract.
+Every PC keeps its VMs in a **`__RivanVMs`** folder on any drive (`C:\__RivanVMs`, `D:\__RivanVMs`, ...). The app finds that folder on each PC by itself. It **only ever extracts and deletes inside `__RivanVMs`**, and never deletes the archives themselves.
 
 ## What's in the folder
 
 | File | What it is |
 |---|---|
-| `LabReset.exe` | The app. It asks for administrator rights when it starts. |
-| `Library\` | All lab archives (built-in and imported) plus `builtin.txt`, the list of built-in ones. |
+| `LabReset.exe` | The app (made by `build.bat`). It asks for administrator rights when it starts. |
+| `Library\` | Extra archives you import, plus `builtin.txt`. |
 | `7zip\` | 7-Zip, used for `.7z`, `.rar` and `.tar.gz` archives (free software, see `7zip\License.txt`). |
-| `LabReset.settings.ini` | Saved settings (created automatically). |
-| `Logs\` | One log file per day: everything extracted, scanned and deleted. |
-| `add-builtin.bat` | For the admin: adds every archive in a folder as built-in. |
-| `build.bat` + `src\` | Source code. Double-click `build.bat` to rebuild `LabReset.exe`. |
+| `LabReset.settings.ini` | Saved settings and your PC list (created automatically). |
+| `Logs\` | One log file per day: everything extracted, scanned and deleted, and every PC that couldn't be reached. |
+| `add-builtin.bat` | For the admin: copies every archive in a folder into `Library\` as built-in. |
+| `build.bat` + `src\` | Source code. Double-click `build.bat` to build `LabReset.exe`. |
 
-### Built-in archives
-These were copied from `C:\__RivanVMs`. They can't be removed from inside the app:
+## Setting it up on the teacher PC
+1. Clone the repo (or copy the folder) to `C:\LabReset`:
+   ```
+   git clone https://github.com/HayzeuMagic/labreset.git C:\LabReset
+   ```
+2. Double-click **`build.bat`**. It creates `LabReset.exe` with the compiler built into Windows.
+3. Run `LabReset.exe`. The archives in this PC's own `__RivanVMs` folder are listed automatically, so nothing big is copied. Archives you import are kept in `Library\`.
 
-- `.7z`: c9800-CL, csr1000v (VOIP Features), Forti, IR-ElasticSys, NetOPS, PaloAltoVM, RSTHayup-v2, yVM-v6
-- `.zip`: D3PentestVM, FGT_VM64 (FortiGate)
-- `.rar`: w2022, WAZUHv2
-- `.tar.gz`: zabbix_appliance-7.4.6-vmx
-
-The `.ova` files are not included. They are imported into VMware, not extracted.
-
-The whole app folder is about 33 GB because of the archives.
-
-## Installing on each lab PC
-
-### Lab PCs that already have the VMs (recommended)
-If a PC already has the archives in **`C:\__RivanVMs`** or **`D:\__RivanVMs`**, the app uses them where they are. Nothing big is copied.
-
-1. Get the app folder onto the PC with `git clone <repo-url> C:\LabReset`, or copy the small folder (without `Library\`).
-2. Double-click **`build.bat`**. It creates `LabReset.exe` using the compiler built into Windows.
-3. Run `LabReset.exe`. The archives appear with Source `C:\__RivanVMs` (or `D:\__RivanVMs`).
-4. The destination and search folders are set automatically to the drive that has the VMs.
-
-Archives in `__RivanVMs` are never deleted by the app; only the extracted VM folders are.
-
-### Lab PCs without the VMs
-Copy the whole `C:\LabReset` folder, including `Library\` (about 31 GB), to each PC, for example with a USB drive or a network share.
-
-### GitHub
-`.gitignore` keeps the archives (`Library\*`), `LabReset.exe`, logs and settings out of Git. GitHub rejects files over 100 MB, so the archives can't be pushed.
-
-Students can't misuse it: the app needs an administrator password to start.
+GitHub rejects files over 100 MB, so `.gitignore` keeps the archives (`Library\*`), `LabReset.exe`, logs and settings out of Git.
 
 ## Using it
 
 **1. Lab archives**
 - Tick the archive(s) you want.
-- **Import archive...** (or drag files onto the list) adds a new `.zip`, `.7z`, `.rar`, `.tar` or `.tar.gz`. It is copied into `Library\`, so it stays in the app even if the original is deleted.
-- **Remove imported** deletes an archive you imported. Built-in archives can't be removed.
+- **Import archive...** (or drag files onto the list) adds a new `.zip`, `.7z`, `.rar`, `.tar` or `.tar.gz`. It is copied into `Library\`, so it stays in the app permanently.
+- **Remove imported** deletes an archive you imported. Built-in archives and archives in `__RivanVMs` can't be removed.
 
-**2. Extract (start of class)**
-- *Destination folder*: default `C:\__RivanVMs`.
+**2. Lab computers**
+- Type a PC's IP address and click **Add**. The PC number is the last 2 digits: `10.3.3.162` is **PC 62**.
+- Add several at once with commas (`10.3.3.162, 10.3.3.163`) or a range (`10.3.3.{101-130}`).
+- Tick the PCs to work on. *This PC* is always in the list.
+- **Test connection** checks each ticked PC and shows where its VMs folder is, e.g. `D:\__RivanVMs`.
+
+**3. Extract (start of class)**
+- Click **Extract ticked archives on ticked PCs**.
+- Each PC gets the VMs in its own `__RivanVMs` folder, whichever drive that is on. The archive is read from this PC and written over the network, up to 4 PCs at a time.
 - *Put each archive in its own folder*: wraps loose files in a folder named after the archive. Archives that already contain one folder (like `Forti.7z` → `Forti\`) are not wrapped twice.
 - *Remove the old copy first*: deletes the previous copy before extracting, for a clean reset.
-- Click **Extract ticked archives**. Progress is shown as a %. **Stop** cancels.
-- Close VMware first if the VM is open.
+- VMware must be closed on those PCs.
 
-**3. Find and delete (end of class)**
-- *Search only in*: default `C:\Users; C:\__RivanVMs`. Leave it empty to search every drive (slower).
-- Click **Scan**. The list shows the path, source archive, how closely it matches (e.g. `94% (17/18 files)`) and date modified.
+**4. Find and delete (end of class)**
+- Click **Scan ticked PCs**. It searches every drive of each ticked PC for its `__RivanVMs` folder and lists the extracted VMs: PC number, path, source archive, match % and date modified.
 - Tick what to remove, click **Delete ticked items...** and confirm. Items are deleted permanently.
-- Students may leave extra files in a VM folder (logs, snapshots); these are deleted along with the folder.
+- PCs that are off or can't be reached are skipped and listed in the log as `UNREACHABLE`.
 
 ### Safety rules (built in)
-- **Never searched:** Windows, Program Files, ProgramData, AppData, $Recycle.Bin and other system folders.
-- **Never deleted:**
-  - drive roots
-  - the `Users` folder and each user's profile
-  - Desktop, Documents, Downloads, Pictures, Music, Videos
-  - the app's own folder (including `Library\`)
-  - the destination folder itself (e.g. `C:\__RivanVMs`); only the VM folders inside it
+- Only things **inside** a `__RivanVMs` folder can be deleted. The `__RivanVMs` folder itself, and everything outside it, can't be.
+- Archive files (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`) are never deleted.
+- The app's own folder is never touched. Windows, Program Files and other system folders are never searched.
+- These rules are checked again right before every delete.
 
-## Adding more built-in archives (admin)
-Run `add-builtin.bat "D:\SomeFolder"`. It copies every archive in that folder into `Library\` and marks it built-in. Then copy the updated `C:\LabReset` folder to the lab PCs again.
+Scan also lists `.ova` files in `__RivanVMs` that match an archive's contents (for example `yVM.ova` from `yVM-v6.7z`). Untick them if you want to keep them.
+
+## Network setup for the lab PCs
+The app reaches other PCs through their hidden admin shares (`\\10.3.3.162\D$`), the same way File Explorer does. For each lab PC:
+
+- **File and Printer Sharing** must be allowed in Windows Firewall.
+- The Windows account running Lab Reset must be an **administrator on that PC**. If it isn't, create the same local admin account (same password) on every PC and enter it with **Network login...**, e.g. `.\LabAdmin`. The password is never saved.
+- If you use local accounts, run this once on each lab PC (as administrator):
+  ```
+  reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f
+  ```
+
+**Test connection** tells you what's wrong for each PC:
+- **Unreachable**: the PC is off, or the firewall is blocking it.
+- **Access is denied**: the account isn't an admin there.
+- **No __RivanVMs folder**: the VMs folder is missing on that PC.
 
 ## Tips
 - The first time the app starts, it reads each archive's file list. It saves the lists in `Library\.cache`, so later starts are instant.
-- "File is in use" when deleting or extracting: a VM is still running, so close VMware and try again.
+- "File is in use" when deleting or extracting: a VM is still running on that PC, so close VMware and try again.
 - Make sure the disk has room: extracted VMs are often 2–3× the archive size.
