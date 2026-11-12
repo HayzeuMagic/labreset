@@ -21,14 +21,14 @@ namespace LabReset
         readonly AppSettings settings;
         string zipFolder;
 
-        ListView lvZips, lvResults;
+        ListView lvZips, lvPcs, lvResults;
         Label lblZipFolder, lblStatus, lblCount;
-        TextBox txtDest, txtScanFolders, txtLog;
+        TextBox txtPcAdd, txtLog;
         NumericUpDown numMatch;
         CheckBox chkOwnFolder, chkClean;
         Button btnStop, btnDelete;
         ProgressBar progress;
-        SplitContainer splitMain, splitLR;
+        SplitContainer splitMain, splitLR, splitLeft;
         readonly List<Control> busyDisabled = new List<Control>();
         readonly System.Windows.Forms.Timer uiTimer = new System.Windows.Forms.Timer { Interval = 250 };
         readonly ResultSorter sorter = new ResultSorter();
@@ -45,6 +45,7 @@ namespace LabReset
             settings = AppSettings.Load(settingsFile);
             zipFolder = Path.Combine(appDir, "Library");          // archives are stored inside the app
             SevenZip.ExePath = Path.Combine(appDir, @"7zip\7z.exe"); // bundled 7-Zip for .7z/.rar/.tar.gz
+            Net.User = settings.NetUser;
 
             BuildUi();
             LoadSettingsIntoUi();
@@ -99,8 +100,8 @@ namespace LabReset
         {
             Text = "Lab Reset  -  " + Environment.MachineName;
             Font = new Font("Segoe UI", 9f);
-            ClientSize = new Size(1280, 820);
-            MinimumSize = new Size(960, 640);
+            ClientSize = new Size(1280, 860);
+            MinimumSize = new Size(1000, 680);
             StartPosition = FormStartPosition.CenterScreen;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
             var bold = new Font(Font, FontStyle.Bold);
@@ -118,29 +119,39 @@ namespace LabReset
                                  Btn("Refresh", RefreshButton_Click));
             var gZip = Group("1. Lab archives   (tick the ones to use)", lvZips, new Control[] { lblZipFolder }, new Control[] { zipButtons });
 
-            // ---- 2. Extract
-            txtDest = new TextBox { Width = 300 };
+            // ---- 2. Lab computers
+            txtPcAdd = new TextBox { Width = 200 };
+            txtPcAdd.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; AddPcs_Click(s, e); } };
+            var pcAddRow = Row(Lbl("IP address:"), txtPcAdd, Btn("Add", AddPcs_Click));
+            var pcHint = new Label { Text = "e.g. 10.3.3.162 (= PC 62), several: 10.3.3.162, 10.3.3.163   range: 10.3.3.{101-130}", Height = 18, AutoEllipsis = true, ForeColor = SystemColors.GrayText };
+            lvPcs = MakeList(new[] { "PC", "IP address", "VMs folder", "Status" }, new[] { 70, 95, 105, 300 });
+            lvPcs.Sorting = SortOrder.Ascending;
+            var pcButtons = Row(Btn("Remove", RemovePcs_Click), Btn("Tick all", (s, e) => SetAllChecked(lvPcs, true), false),
+                                Btn("Tick none", (s, e) => SetAllChecked(lvPcs, false), false), Btn("Test connection", TestPcs_Click),
+                                Btn("Network login...", NetLogin_Click));
+            var gPc = Group("2. Lab computers   (tick the PCs to work on)", lvPcs, new Control[] { pcAddRow, pcHint }, new Control[] { pcButtons });
+
+            // ---- 3. Extract
             chkOwnFolder = new CheckBox { Text = "Put each archive in its own folder (if it doesn't already have one)", AutoSize = true, Margin = new Padding(3, 5, 16, 3) };
             chkClean = new CheckBox { Text = "Remove the old copy first (clean reset)", AutoSize = true, Margin = new Padding(3, 5, 3, 3) };
-            var btnExtract = Btn("Extract ticked archives", Extract_Click);
+            var btnExtract = Btn("Extract ticked archives on ticked PCs", Extract_Click);
             btnExtract.Font = bold;
-            var gExtract = new GroupBox { Text = "2. Extract", Height = 128, Padding = new Padding(8, 4, 8, 4) };
+            var gExtract = new GroupBox { Text = "3. Extract", Height = 128, Padding = new Padding(8, 4, 8, 4) };
             Stack(gExtract, null, new Control[] {
-                Row(Lbl("Destination folder:"), txtDest, Btn("Browse...", BrowseDest_Click)),
+                Row(Lbl("Extracts into the " + VmFolder.Name + " folder on each ticked PC - on whichever drive it is (C:, D:, ...).")),
                 Row(chkOwnFolder, chkClean),
                 Row(btnExtract) }, null);
 
-            // ---- 3. Scan & delete
-            txtScanFolders = new TextBox { Width = 250 };
+            // ---- 4. Scan & delete
             numMatch = new NumericUpDown { Minimum = 10, Maximum = 100, Width = 55, Margin = new Padding(3, 4, 3, 3) };
-            var btnScan = Btn("Scan", Scan_Click);
+            var btnScan = Btn("Scan ticked PCs", Scan_Click);
             btnScan.Font = bold;
             btnStop = Btn("Stop", (s, e) => { if (cts != null) { cts.Cancel(); statusText = "Stopping..."; } }, false);
             btnStop.Enabled = false;
-            var scanRow1 = Row(Lbl("Search only in (separate with ;   leave empty = all drives):"), txtScanFolders,
-                               Lbl("Minimum match %:"), numMatch, btnScan, btnStop);
-            lvResults = MakeList(new[] { "Path", "Type", "From archive", "Match", "Date modified" },
-                                 new[] { 360, 55, 120, 125, 115 });
+            var scanRow1 = Row(Lbl("Searches every drive of each ticked PC for its " + VmFolder.Name + " folder.   Minimum match %:"),
+                               numMatch, btnScan, btnStop);
+            lvResults = MakeList(new[] { "PC", "Path", "Type", "From archive", "Match", "Date modified" },
+                                 new[] { 80, 300, 50, 120, 120, 110 });
             lvResults.ColumnClick += Results_ColumnClick;
             lvResults.ItemChecked += (s, e) => UpdateCount();
             lvResults.DoubleClick += (s, e) => { if (lvResults.SelectedItems.Count > 0) ShowInExplorer(((ScanResult)lvResults.SelectedItems[0].Tag).AccessPath); };
@@ -150,8 +161,8 @@ namespace LabReset
             btnDelete.Font = bold;
             var resRow = Row(Btn("Tick all", (s, e) => SetAllChecked(lvResults, true), false),
                              Btn("Tick none", (s, e) => SetAllChecked(lvResults, false), false), btnDelete, lblCount);
-            var resHint = new Label { Text = "Double-click a row to open it in Explorer. Click a column title to sort.", Height = 18, ForeColor = SystemColors.GrayText };
-            var gScan = Group("3. Find and delete extracted lab files", lvResults, new Control[] { scanRow1 }, new Control[] { resRow, resHint });
+            var resHint = new Label { Text = "Only things inside " + VmFolder.Name + " are ever deleted (never the archives). Double-click a row to open it.", Height = 18, ForeColor = SystemColors.GrayText };
+            var gScan = Group("4. Find and delete extracted VMs", lvResults, new Control[] { scanRow1 }, new Control[] { resRow, resHint });
 
             // ---- status
             progress = new ProgressBar { Height = 16 };
@@ -165,8 +176,11 @@ namespace LabReset
             var gLog = Group("Log", txtLog, null, new Control[] { logButtons });
 
             // ---- layout
+            splitLeft = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
+            splitLeft.Panel1.Controls.Add(gZip);
+            splitLeft.Panel2.Controls.Add(gPc);
             splitLR = new SplitContainer { Dock = DockStyle.Fill };
-            splitLR.Panel1.Controls.Add(gZip);
+            splitLR.Panel1.Controls.Add(splitLeft);
             Stack(splitLR.Panel2, gScan, new Control[] { gExtract }, new Control[] { statusPanel });
             splitMain = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, Padding = new Padding(4) };
             splitMain.Panel1.Controls.Add(splitLR);
@@ -178,8 +192,9 @@ namespace LabReset
         {
             try
             {
-                splitMain.SplitterDistance = Math.Max(300, splitMain.Height - 190);
-                splitLR.SplitterDistance = 450;
+                splitMain.SplitterDistance = Math.Max(300, splitMain.Height - 170);
+                splitLR.SplitterDistance = 470;
+                splitLeft.SplitterDistance = Math.Max(150, splitLeft.Height / 2);
             }
             catch { }
         }
@@ -196,6 +211,7 @@ namespace LabReset
             Logger.Write("Lab Reset started on " + Environment.MachineName + ". Library: " + zipFolder);
             if (!IsAdmin()) Logger.Write("WARNING: not running as administrator - deleting/extracting may fail. Right-click LabReset.exe > Run as administrator.");
             if (SevenZip.Find() == null) Logger.Write("WARNING: 7-Zip was not found (7zip\\7z.exe) - .7z, .rar and .tar.gz archives can't be used.");
+            if (!string.IsNullOrEmpty(Net.User)) Logger.Write("Network login user is '" + Net.User + "'. Enter its password with 'Network login...' before working on lab PCs.");
             StartupRefresh();
         }
 
@@ -208,42 +224,28 @@ namespace LabReset
         // ================================================================== settings
         void LoadSettingsIntoUi()
         {
-            List<string> sources = ExistingSourceFolders();
-            if (!File.Exists(settingsFile))
-            {
-                // First run on this PC: use whichever drive has the VMs.
-                settings.Destination = sources.Count > 0 ? sources[0] : SourceFolders[0];
-                settings.ScanFolders = string.Join("; ", new[] { @"C:\Users" }.Concat(sources));
-            }
-            else if (sources.Count > 0)
-            {
-                // Settings copied from a PC whose VMs were on the other drive: point at the drive this PC uses.
-                foreach (string missing in SourceFolders.Where(f => !sources.Contains(f)))
-                {
-                    if (string.Equals(Paths.Normalize(settings.Destination), missing, StringComparison.OrdinalIgnoreCase)) settings.Destination = sources[0];
-                    settings.ScanFolders = System.Text.RegularExpressions.Regex.Replace(settings.ScanFolders,
-                        System.Text.RegularExpressions.Regex.Escape(missing) + @"(?=\s*(;|$))", sources[0].Replace("$", "$$"),
-                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                }
-            }
-            txtDest.Text = settings.Destination;
-            txtScanFolders.Text = settings.ScanFolders;
             numMatch.Value = Math.Max(numMatch.Minimum, Math.Min(numMatch.Maximum, settings.MinMatch));
             chkOwnFolder.Checked = settings.OwnFolder;
             chkClean.Checked = settings.CleanFirst;
             lblZipFolder.Text = "Library: " + zipFolder;
+
+            bool thisPcChecked = true;
+            foreach (var p in settings.Pcs) if (p.Key == PcNames.ThisPc) thisPcChecked = p.Value;
+            AddPcRow(PcNames.ThisPc, thisPcChecked);
+            foreach (var p in settings.Pcs)
+                if (p.Key != PcNames.ThisPc) AddPcRow(p.Key, p.Value);
         }
 
         void SaveSettings()
         {
             try
             {
-                settings.Destination = txtDest.Text.Trim();
-                settings.ScanFolders = txtScanFolders.Text.Trim();
                 settings.MinMatch = (int)numMatch.Value;
                 settings.OwnFolder = chkOwnFolder.Checked;
                 settings.CleanFirst = chkClean.Checked;
+                settings.NetUser = Net.User ?? "";
                 settings.CheckedZips = lvZips.CheckedItems.Cast<ListViewItem>().Select(i => i.Text).ToList();
+                settings.Pcs = lvPcs.Items.Cast<ListViewItem>().Select(i => new KeyValuePair<string, bool>((string)i.Tag, i.Checked)).ToList();
                 settings.Save(settingsFile);
             }
             catch (Exception ex) { Logger.Write("Could not save settings: " + ex.Message); }
@@ -262,6 +264,7 @@ namespace LabReset
                 if (cts != null) cts.Cancel();
             }
             SaveSettings();
+            Net.DisconnectAll();
             base.OnFormClosing(e);
         }
 
@@ -340,7 +343,8 @@ namespace LabReset
             foreach (Control c in busyDisabled) c.Enabled = true;
             btnStop.Enabled = false;
             statusText = text;
-            progressDone = progress.Maximum;
+            progressDone = 0;
+            progress.Value = 0;
             UpdateStatus();
         }
 
@@ -362,18 +366,12 @@ namespace LabReset
             return lvZips.Items.Cast<ListViewItem>().Select(i => i.Tag as ZipSignature).Where(z => z != null).ToList();
         }
 
-        // Lab PCs that already have the VM archives keep them in one of these folders.
-        static readonly string[] SourceFolders = { @"C:\__RivanVMs", @"D:\__RivanVMs" };
         List<string> archivePaths = new List<string>();
 
+        /// <summary>This PC's own __RivanVMs folder(s), whose archives are listed in the library.</summary>
         static List<string> ExistingSourceFolders()
         {
-            var l = new List<string>();
-            foreach (string f in SourceFolders)
-            {
-                try { if (Directory.Exists(f)) l.Add(f); } catch { }
-            }
-            return l;
+            return VmFolder.Find(PcNames.ThisPc, CancellationToken.None);
         }
 
         // The app folder, its library and every archive file can never be deleted.
@@ -381,13 +379,6 @@ namespace LabReset
         {
             var l = new List<string> { zipFolder, appDir };
             l.AddRange(archivePaths);
-            return l;
-        }
-
-        List<string> ProtectExact()
-        {
-            var l = new List<string>();
-            if (Safety.CheckDestination(txtDest.Text) == null) l.Add(Paths.Normalize(txtDest.Text));
             return l;
         }
 
@@ -653,100 +644,255 @@ namespace LabReset
             SaveSettings();
         }
 
-        // ================================================================== 2. extract
-        const string Here = PcNames.ThisPc;
-
-        void BrowseDest_Click(object sender, EventArgs e)
+        // ================================================================== 2. lab computers
+        ListViewItem AddPcRow(string pc, bool isChecked)
         {
-            using (var d = new FolderBrowserDialog { Description = "Choose the folder to extract the lab archives into.", SelectedPath = txtDest.Text })
-                if (d.ShowDialog(this) == DialogResult.OK) txtDest.Text = d.SelectedPath;
+            var it = new ListViewItem(PcNames.Number(pc)) { Checked = isChecked, Tag = pc };
+            it.SubItems.Add(pc == PcNames.ThisPc ? Environment.MachineName : pc);
+            it.SubItems.Add("");
+            it.SubItems.Add("");
+            lvPcs.Items.Add(it);
+            return it;
         }
 
+        List<string> CheckedPcs()
+        {
+            return lvPcs.CheckedItems.Cast<ListViewItem>().Select(i => (string)i.Tag).ToList();
+        }
+
+        void SetPcInfo(string pc, string folders, string status)
+        {
+            UI(() =>
+            {
+                foreach (ListViewItem i in lvPcs.Items)
+                {
+                    if (!string.Equals((string)i.Tag, pc, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (folders != null) i.SubItems[2].Text = folders;
+                    if (status != null)
+                    {
+                        i.SubItems[3].Text = status;
+                        i.ForeColor = status.StartsWith("OK") ? Color.DarkGreen : status.StartsWith("Working") ? SystemColors.WindowText : Color.Firebrick;
+                    }
+                }
+            });
+        }
+
+        void AddPcs_Click(object sender, EventArgs e)
+        {
+            var errors = new List<string>();
+            List<string> names = PcNames.Expand(txtPcAdd.Text, errors);
+            if (errors.Count > 0) Msg(string.Join("\n", errors.Take(12)), MessageBoxIcon.Warning);
+            int added = 0;
+            foreach (string n in names)
+            {
+                if (lvPcs.Items.Cast<ListViewItem>().Any(i => string.Equals((string)i.Tag, n, StringComparison.OrdinalIgnoreCase))) continue;
+                if (PcNames.IsLocal(n)) { Logger.Write(n + " is this PC - it is already in the list as 'This PC'."); continue; }
+                AddPcRow(n, true);
+                added++;
+            }
+            if (added > 0)
+            {
+                Logger.Write("Added " + added + " computer(s).");
+                txtPcAdd.Clear();
+                SaveSettings();
+            }
+            else if (errors.Count == 0 && names.Count == 0) Msg("Type an IP address first, e.g. 10.3.3.162");
+        }
+
+        void RemovePcs_Click(object sender, EventArgs e)
+        {
+            var items = lvPcs.SelectedItems.Cast<ListViewItem>().Where(i => (string)i.Tag != PcNames.ThisPc).ToList();
+            if (items.Count == 0) { Msg("Click a PC to select it (hold Ctrl or Shift for several), then click Remove.\n'This PC' can't be removed - just untick it."); return; }
+            foreach (ListViewItem i in items) lvPcs.Items.Remove(i);
+            SaveSettings();
+        }
+
+        async void TestPcs_Click(object sender, EventArgs e)
+        {
+            List<string> pcs = CheckedPcs();
+            if (pcs.Count == 0) { Msg("Tick the PCs to test first."); return; }
+            BeginBusy("Testing connections...", pcs.Count);
+            CancellationToken ct = cts.Token;
+            Logger.Write("=== TEST CONNECTION on " + pcs.Count + " PC(s)");
+            int ok = 0;
+            try
+            {
+                foreach (string pc in pcs) SetPcInfo(pc, "", "Working...");
+                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 16), pc =>
+                {
+                    string r, folders = "";
+                    try
+                    {
+                        r = Net.Test(pc);
+                        if (r.StartsWith("OK"))
+                        {
+                            List<string> f = VmFolder.Find(pc, ct);
+                            folders = f.Count > 0 ? string.Join(", ", f) : "not found";
+                            if (f.Count == 0) r = "No " + VmFolder.Name + " folder on any drive";
+                            else Interlocked.Increment(ref ok);
+                        }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { r = "Error - " + ex.Message; }
+                    SetPcInfo(pc, folders, r);
+                    Logger.Write("  " + PcNames.Display(pc) + ": " + r + (folders.Length > 0 ? "   [" + folders + "]" : ""));
+                    StepDone();
+                }));
+            }
+            catch (OperationCanceledException) { Logger.Write("Test stopped."); }
+            finally { EndBusy("Connection test finished: " + ok + " of " + pcs.Count + " PC(s) ready."); }
+            Logger.Write("=== TEST finished: " + ok + " of " + pcs.Count + " PC(s) ready.");
+        }
+
+        void NetLogin_Click(object sender, EventArgs e)
+        {
+            using (var f = new Form
+            {
+                Text = "Network login for lab computers", FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(470, 250), MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, Font = Font
+            })
+            {
+                var info = new Label
+                {
+                    Location = new Point(12, 10), Size = new Size(446, 92),
+                    Text = "Only needed if 'Test connection' says 'Access is denied'.\n\n" +
+                           "Enter an administrator account that exists on every lab PC, e.g.  .\\LabAdmin  (a local account with the same password on each PC). " +
+                           "The password is kept in memory only and is never saved."
+                };
+                var lu = new Label { Text = "User name:", Location = new Point(12, 112), AutoSize = true };
+                var tu = new TextBox { Location = new Point(110, 109), Width = 340, Text = Net.User ?? "" };
+                var lp = new Label { Text = "Password:", Location = new Point(12, 146), AutoSize = true };
+                var tp = new TextBox { Location = new Point(110, 143), Width = 340, UseSystemPasswordChar = true, Text = Net.Password ?? "" };
+                var ok = new Button { Text = "Use this login", Location = new Point(110, 196), AutoSize = true, DialogResult = DialogResult.OK };
+                var clear = new Button { Text = "Don't use a login", Location = new Point(230, 196), AutoSize = true, DialogResult = DialogResult.Abort };
+                var cancel = new Button { Text = "Cancel", Location = new Point(370, 196), AutoSize = true, DialogResult = DialogResult.Cancel };
+                f.Controls.AddRange(new Control[] { info, lu, tu, lp, tp, ok, clear, cancel });
+                f.AcceptButton = ok;
+                f.CancelButton = cancel;
+                DialogResult r = f.ShowDialog(this);
+                if (r == DialogResult.Cancel) return;
+                Net.DisconnectAll();
+                if (r == DialogResult.OK && tu.Text.Trim().Length > 0)
+                {
+                    Net.User = tu.Text.Trim();
+                    Net.Password = tp.Text;
+                    Logger.Write("Network login set to user '" + Net.User + "'.");
+                }
+                else
+                {
+                    Net.User = null;
+                    Net.Password = null;
+                    Logger.Write("Network login cleared - your own Windows account will be used.");
+                }
+                SaveSettings();
+            }
+        }
+
+        /// <summary>Checks access and finds the PC's __RivanVMs folder(s). Returns null (and logs why) if the PC can't be used.</summary>
+        List<string> PreparePc(string pc, CancellationToken ct)
+        {
+            string name = PcNames.Display(pc);
+            string err = Net.CheckAccess(pc);
+            if (err != null)
+            {
+                Logger.Write("UNREACHABLE " + name + ": " + err);
+                SetPcInfo(pc, null, "Unreachable - " + err);
+                return null;
+            }
+            List<string> folders = VmFolder.Find(pc, ct);
+            SetPcInfo(pc, folders.Count > 0 ? string.Join(", ", folders) : "not found", null);
+            if (folders.Count == 0)
+            {
+                Logger.Write("SKIPPED " + name + ": no " + VmFolder.Name + " folder on any drive.");
+                SetPcInfo(pc, null, "No " + VmFolder.Name + " folder on any drive");
+                return null;
+            }
+            SetPcInfo(pc, null, "Working...");
+            return folders;
+        }
+
+        // ================================================================== 3. extract
         async void Extract_Click(object sender, EventArgs e)
         {
             List<ZipSignature> zips = CheckedZips();
             if (zips.Count == 0) { Msg("Tick the archives you want to extract (section 1)."); return; }
-            string destErr = Safety.CheckDestination(txtDest.Text);
-            if (destErr != null) { Msg(destErr, MessageBoxIcon.Warning); return; }
-            string dest = Paths.Normalize(txtDest.Text);
-            txtDest.Text = dest;
+            List<string> pcs = CheckedPcs();
+            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2)."); return; }
             bool own = chkOwnFolder.Checked, clean = chkClean.Checked;
 
             var sbq = new StringBuilder();
-            sbq.AppendLine("Extract " + zips.Count + " archive(s)?\n");
-            foreach (ZipSignature z in zips.Take(12)) sbq.AppendLine("  " + z.FileName + "  ->  " + FileOps.ResultFolder(z, dest, own));
+            sbq.AppendLine("Extract " + zips.Count + " archive(s) on " + pcs.Count + " PC(s)?\n");
+            sbq.AppendLine("PCs: " + string.Join(", ", pcs.Take(15).Select(PcNames.Number)) + (pcs.Count > 15 ? ", ..." : ""));
+            sbq.AppendLine();
+            foreach (ZipSignature z in zips.Take(12))
+                sbq.AppendLine("  " + z.FileName + "  ->  " + FileOps.ResultFolder(z, @"X:\" + VmFolder.Name, own).Replace(@"X:\", @"?:\"));
             if (zips.Count > 12) sbq.AppendLine("  ...and " + (zips.Count - 12) + " more");
             sbq.AppendLine();
+            sbq.AppendLine("?: is the drive where each PC has its " + VmFolder.Name + " folder.");
             sbq.Append(clean ? "Old copies are removed first (clean reset)." : "Files with the same name are overwritten.");
-            sbq.Append("\nClose VMware/VirtualBox first if these VMs are open.");
+            sbq.Append("\nVMware must be closed on those PCs.");
             if (MessageBox.Show(this, sbq.ToString(), "Confirm extract", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
             SaveSettings();
-            BeginBusy("Extracting...", zips.Count * 100);
+            BeginBusy("Extracting...", pcs.Count * zips.Count * 100);
             CancellationToken ct = cts.Token;
             List<string> tree = ProtectTree();
-            int ok = 0, failed = 0;
-            Logger.Write("=== EXTRACT " + zips.Count + " archive(s) to " + dest);
+            int ok = 0, failed = 0, skipped = 0;
+            Logger.Write("=== EXTRACT " + zips.Count + " archive(s) on " + pcs.Count + " PC(s)");
             try
             {
-                await Task.Run(() =>
+                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 4), pc =>
                 {
-                    for (int idx = 0; idx < zips.Count; idx++)
+                    string name = PcNames.Display(pc);
+                    List<string> folders = PreparePc(pc, ct);
+                    if (folders == null)
                     {
-                        ZipSignature z = zips[idx];
-                        int baseDone = idx * 100;
+                        Interlocked.Increment(ref skipped);
+                        Interlocked.Add(ref progressDone, zips.Count * 100);
+                        return;
+                    }
+                    string dest = folders[0];
+                    int pcFailed = 0;
+                    foreach (ZipSignature z in zips)
+                    {
                         ct.ThrowIfCancellationRequested();
-                        statusText = "Extracting " + z.FileName + " (" + (idx + 1) + " of " + zips.Count + ")...";
-                        progressDone = baseDone;
+                        int reported = 0;
+                        statusText = "Extracting " + z.FileName + " on " + PcNames.Number(pc) + "...";
                         try
                         {
-                            int n = FileOps.ExtractArchive(z, Here, dest, own, clean, tree, Logger.Write, pct =>
+                            int n = FileOps.ExtractArchive(z, pc, dest, own, clean, tree, Logger.Write, pct =>
                             {
                                 pct = Math.Max(0, Math.Min(100, pct));
-                                progressDone = baseDone + pct;
-                                statusText = "Extracting " + z.FileName + " (" + (idx + 1) + " of " + zips.Count + ")...  " + pct + "%";
+                                if (pct > reported) { Interlocked.Add(ref progressDone, pct - reported); reported = pct; }
+                                statusText = "Extracting " + z.FileName + " on " + PcNames.Number(pc) + "...  " + pct + "%";
                             }, ct);
-                            Logger.Write("Extracted " + z.FileName + " -> " + FileOps.ResultFolder(z, dest, own) + "  (" + n + " files)");
-                            ok++;
+                            Logger.Write("Extracted " + z.FileName + " -> " + name + "  " + FileOps.ResultFolder(z, dest, own) + "  (" + n + " files)");
+                            Interlocked.Increment(ref ok);
                         }
                         catch (OperationCanceledException) { throw; }
                         catch (Exception ex)
                         {
-                            failed++;
-                            Logger.Write("FAILED extracting " + z.FileName + ": " + ex.Message +
+                            Interlocked.Increment(ref failed);
+                            pcFailed++;
+                            Logger.Write("FAILED extracting " + z.FileName + " on " + name + ": " + ex.Message +
                                          (ex is IOException ? "  (is the VM still open, or is the disk full?)" : ""));
                         }
-                        progressDone = baseDone + 100;
+                        Interlocked.Add(ref progressDone, 100 - reported);
                     }
-                }, ct);
+                    SetPcInfo(pc, null, pcFailed == 0 ? "OK - extracted" : "Extract had errors - see log");
+                }), ct);
             }
             catch (OperationCanceledException) { Logger.Write("Extract stopped by user."); }
+            catch (AggregateException ax) { Logger.Write("Extract error: " + ax.InnerException.Message); }
             finally
             {
-                string summary = "Extract finished: " + ok + " OK, " + failed + " failed.";
+                string summary = "Extract finished: " + ok + " OK, " + failed + " failed, " + skipped + " PC(s) skipped.";
                 Logger.Write("=== " + summary);
                 EndBusy(summary);
             }
         }
 
-        // ================================================================== 3. scan
-        string ParseFolders(string text, out List<string> folders)
-        {
-            folders = new List<string>();
-            foreach (string raw in text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (raw.Trim().Length == 0) continue;
-                string p = Paths.Normalize(raw);
-                if (p == null || !Paths.IsDrivePath(p))
-                    return "\"" + raw.Trim() + "\" is not a full folder path. Use paths like C:\\Users, separated by ;";
-                if (!folders.Contains(p, StringComparer.OrdinalIgnoreCase)) folders.Add(p);
-            }
-            // drop folders that are inside another listed folder
-            List<string> all = folders;
-            folders = all.Where(f => !all.Any(o => !o.Equals(f, StringComparison.OrdinalIgnoreCase) && Paths.IsSameOrUnder(f, o))).ToList();
-            return null;
-        }
-
+        // ================================================================== 4. scan
         async void Scan_Click(object sender, EventArgs e)
         {
             List<ZipSignature> zips = CheckedZips();
@@ -754,37 +900,53 @@ namespace LabReset
             {
                 zips = AllZips();
                 if (zips.Count == 0) { Msg("Import your lab archives first (section 1)."); return; }
-                Logger.Write("No archives ticked - looking for files from all " + zips.Count + " archive(s).");
+                Logger.Write("No archives ticked - looking for VMs from all " + zips.Count + " archive(s).");
             }
-            List<string> folders;
-            string ferr = ParseFolders(txtScanFolders.Text, out folders);
-            if (ferr != null) { Msg(ferr, MessageBoxIcon.Warning); return; }
+            List<string> pcs = CheckedPcs();
+            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2)."); return; }
 
             SaveSettings();
             lvResults.Items.Clear();
             UpdateCount();
             int min = (int)numMatch.Value;
-            List<string> tree = ProtectTree(), exact = ProtectExact();
-            BeginBusy("Scanning...", 1);
-            progress.Style = ProgressBarStyle.Marquee;
+            List<string> tree = ProtectTree();
+            BeginBusy("Scanning...", pcs.Count);
             CancellationToken ct = cts.Token;
-            var sc = new Scanner(Here, zips, min, tree, exact, ct);
-            sc.Found = r => UI(() => AddResult(r));
-            sc.Status = p => statusText = "Scanning:  " + p;
-            sc.Log = Logger.Write;
-            Logger.Write(string.Format("=== SCAN for files from {0} archive(s) in {1} (minimum match {2}%)",
-                zips.Count, folders.Count == 0 ? "all drives" : string.Join("; ", folders), min));
+            int found = 0, skipped = 0;
+            Logger.Write(string.Format("=== SCAN {0} PC(s) for VMs from {1} archive(s) (minimum match {2}%)", pcs.Count, zips.Count, min));
             try
             {
-                await Task.Run(() => sc.Run(folders), ct);
+                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 8), pc =>
+                {
+                    string name = PcNames.Display(pc);
+                    try
+                    {
+                        List<string> folders = PreparePc(pc, ct);
+                        if (folders == null) { Interlocked.Increment(ref skipped); return; }
+                        var sc = new Scanner(pc, zips, min, tree, folders, ct);
+                        sc.Found = r => UI(() => AddResult(r));
+                        sc.Status = p => statusText = "Scanning " + PcNames.Number(pc) + ":  " + p;
+                        sc.Log = Logger.Write;
+                        sc.Run(folders);
+                        Interlocked.Add(ref found, sc.ItemsFound);
+                        Logger.Write(string.Format("Scanned {0} [{1}]: {2} item(s) found{3}.", name, string.Join(", ", folders), sc.ItemsFound,
+                            sc.FoldersUnreadable > 0 ? ", " + sc.FoldersUnreadable + " folder(s) could not be read" : ""));
+                        SetPcInfo(pc, null, "OK - scanned, " + sc.ItemsFound + " found");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        Logger.Write("ERROR scanning " + name + ": " + ex.Message);
+                        SetPcInfo(pc, null, "Error - " + ex.Message);
+                    }
+                    finally { StepDone(); }
+                }), ct);
             }
             catch (OperationCanceledException) { Logger.Write("Scan stopped by user."); }
-            catch (Exception ex) { Logger.Write("Scan error: " + ex.Message); }
+            catch (AggregateException ax) { Logger.Write("Scan error: " + ax.InnerException.Message); }
             finally
             {
-                progress.Style = ProgressBarStyle.Blocks;
-                string summary = string.Format("Scan finished: {0} folders searched, {1} item(s) found{2}.", sc.FoldersScanned, sc.ItemsFound,
-                    sc.FoldersUnreadable > 0 ? ", " + sc.FoldersUnreadable + " folder(s) could not be read" : "");
+                string summary = "Scan finished: " + found + " item(s) found" + (skipped > 0 ? ", " + skipped + " PC(s) skipped" : "") + ".";
                 Logger.Write("=== " + summary);
                 EndBusy(summary);
             }
@@ -792,7 +954,8 @@ namespace LabReset
 
         void AddResult(ScanResult r)
         {
-            var it = new ListViewItem(r.LocalPath) { Tag = r };
+            var it = new ListViewItem(PcNames.Number(r.Computer)) { Tag = r };
+            it.SubItems.Add(r.LocalPath);
             it.SubItems.Add(r.IsFolder ? "Folder" : "File");
             it.SubItems.Add(r.ZipName);
             it.SubItems.Add(r.Percent + "%  (" + r.Matched + "/" + r.Checked + " files)");
@@ -818,8 +981,8 @@ namespace LabReset
                 var ra = (ScanResult)a.Tag;
                 var rb = (ScanResult)b.Tag;
                 int r;
-                if (Column == 3) r = ra.Percent.CompareTo(rb.Percent);
-                else if (Column == 4) r = ra.Modified.CompareTo(rb.Modified);
+                if (Column == 4) r = ra.Percent.CompareTo(rb.Percent);
+                else if (Column == 5) r = ra.Modified.CompareTo(rb.Modified);
                 else r = string.Compare(a.SubItems[Column].Text, b.SubItems[Column].Text, StringComparison.OrdinalIgnoreCase);
                 return Descending ? -r : r;
             }
@@ -833,16 +996,17 @@ namespace LabReset
             lvResults.Sort();
         }
 
-        // ================================================================== 3. delete
+        // ================================================================== 4. delete
         async void Delete_Click(object sender, EventArgs e)
         {
             List<ListViewItem> items = lvResults.CheckedItems.Cast<ListViewItem>().ToList();
             if (items.Count == 0) { Msg("Tick the items you want to delete first."); return; }
             List<ScanResult> results = items.Select(i => (ScanResult)i.Tag).ToList();
+            var pcList = results.Select(r => r.Computer).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             var sb = new StringBuilder();
-            sb.AppendFormat("Permanently delete {0} item(s)?\n\n", results.Count);
-            foreach (ScanResult r in results.Take(12)) sb.AppendLine("  " + r.LocalPath);
+            sb.AppendFormat("Permanently delete {0} item(s) on {1} PC(s)?\n\n", results.Count, pcList.Count);
+            foreach (ScanResult r in results.Take(12)) sb.AppendLine("  " + PcNames.Number(r.Computer) + "   " + r.LocalPath);
             if (results.Count > 12) sb.AppendLine("  ...and " + (results.Count - 12) + " more");
             sb.Append("\nDeleted files do NOT go to the Recycle Bin. This cannot be undone.");
             if (MessageBox.Show(this, sb.ToString(), "Confirm delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
@@ -850,48 +1014,60 @@ namespace LabReset
 
             BeginBusy("Deleting...", results.Count);
             CancellationToken ct = cts.Token;
-            List<string> tree = ProtectTree(), exact = ProtectExact();
+            List<string> tree = ProtectTree();
             var deleted = new ConcurrentBag<ScanResult>();
             int failed = 0, skipped = 0;
-            Logger.Write("=== DELETE " + results.Count + " item(s)");
+            Logger.Write("=== DELETE " + results.Count + " item(s) on " + pcList.Count + " PC(s)");
             try
             {
-                await Task.Run(() =>
+                var groups = results.GroupBy(r => r.Computer, StringComparer.OrdinalIgnoreCase).ToList();
+                await Task.Run(() => Parallel.ForEach(groups, Par(ct, 8), g =>
                 {
-                    foreach (ScanResult r in results)
+                    string pc = g.Key, name = PcNames.Display(pc);
+                    string err = Net.CheckAccess(pc);
+                    if (err != null)
+                    {
+                        Logger.Write("UNREACHABLE " + name + ": " + err + "  (" + g.Count() + " item(s) not deleted)");
+                        Interlocked.Add(ref failed, g.Count());
+                        Interlocked.Add(ref progressDone, g.Count());
+                        return;
+                    }
+                    foreach (ScanResult r in g)
                     {
                         ct.ThrowIfCancellationRequested();
-                        statusText = "Deleting:  " + r.LocalPath;
-                        string why = Safety.WhyProtected(r.LocalPath, tree, exact);
+                        statusText = "Deleting on " + PcNames.Number(pc) + ":  " + r.LocalPath;
+                        string why = Safety.WhyNotDeletable(r.LocalPath, PcNames.IsLocal(pc) ? tree : null);
                         if (why != null)
                         {
-                            skipped++;
-                            Logger.Write("SKIPPED (protected: " + why + ")  " + r.LocalPath);
+                            Interlocked.Increment(ref skipped);
+                            Logger.Write("SKIPPED (protected: " + why + ") " + name + "  " + r.LocalPath);
                         }
                         else
                         {
+                            string access = Paths.ToAccess(pc, r.LocalPath);
                             try
                             {
-                                if (!FileOps.Exists(r.LocalPath)) Logger.Write("Already gone: " + r.LocalPath);
+                                if (!FileOps.Exists(access)) Logger.Write("Already gone: " + name + "  " + r.LocalPath);
                                 else
                                 {
-                                    FileOps.DeletePath(r.LocalPath);
-                                    Logger.Write("Deleted " + r.LocalPath);
+                                    FileOps.DeletePath(access);
+                                    Logger.Write("Deleted " + name + "  " + r.LocalPath);
                                 }
                                 deleted.Add(r);
                             }
                             catch (Exception ex)
                             {
-                                failed++;
-                                Logger.Write("FAILED to delete " + r.LocalPath + ": " + ex.Message +
-                                             (ex is IOException ? "  (a file may still be open - close it and try again)" : ""));
+                                Interlocked.Increment(ref failed);
+                                Logger.Write("FAILED to delete " + name + "  " + r.LocalPath + ": " + ex.Message +
+                                             (ex is IOException ? "  (is the VM still open on that PC?)" : ""));
                             }
                         }
                         StepDone();
                     }
-                }, ct);
+                }), ct);
             }
             catch (OperationCanceledException) { Logger.Write("Delete stopped by user."); }
+            catch (AggregateException ax) { Logger.Write("Delete error: " + ax.InnerException.Message); }
             finally
             {
                 var gone = new HashSet<ScanResult>(deleted);
