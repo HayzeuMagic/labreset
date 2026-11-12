@@ -1,0 +1,11 @@
+# The VM archives are far too big for GitHub (100 MB file limit).
+# Lab PCs use the copies already in C:\__RivanVMs or D:\__RivanVMs.
+Library/*
+!Library/builtin.txt
+
+# Built on each PC with build.bat
+LabReset.exe
+
+# Per-PC files
+Logs/
+LabReset.settings.ini
