@@ -1,0 +1,14 @@
+﻿# Built-in archives (cannot be removed inside Lab Reset)
+c9800-CL-universal9.17.15.03.7z
+csr1000v-universalk9.17.03.01a (VOIP Features).7z
+D3PentestVM.zip
+FGT_VM64-v7.2.0.F-build1157-FORTINET.out.ovf-20240901T041419Z-001.zip
+Forti.7z
+IR-ElasticSys.7z
+NetOPS.7z
+PaloAltoVM.7z
+RSTHayup-v2.7z
+w2022.rar
+WAZUHv2.rar
+yVM-v6.7z
+zabbix_appliance-7.4.6-vmx.tar.gz
