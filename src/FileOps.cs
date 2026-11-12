@@ -76,6 +76,7 @@ namespace LabReset
                     string acc = Paths.ToAccess(pc, loc);
                     if (!FileOps.Exists(acc)) continue;
                     string why = Safety.WhyProtected(loc, tree, exact);
+                    if (why == null && ZipSignature.IsArchive(Path.GetFileName(loc))) why = "it is an archive file";
                     if (why != null) { log(PcNames.Display(pc) + ": old copy " + loc + " not removed (" + why + ")."); continue; }
                     log("Removing old copy " + loc + " ...");
                     DeletePath(acc);

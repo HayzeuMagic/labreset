@@ -70,6 +70,18 @@ namespace LabReset
             return null;
         }
 
+        /// <summary>
+        /// Final check before Lab Reset deletes anything: it must be inside an X:\__RivanVMs folder,
+        /// must not be an archive file (the lab's source .zip/.7z/.rar), and must pass WhyProtected.
+        /// Returns why it can't be deleted, or null if it can.
+        /// </summary>
+        public static string WhyNotDeletable(string local, IEnumerable<string> protectTree)
+        {
+            if (!VmFolder.IsInside(local)) return "not inside a " + VmFolder.Name + " folder";
+            if (ZipSignature.IsArchive(Path.GetFileName(local.TrimEnd('\\')))) return "it is an archive file";
+            return WhyProtected(local, protectTree, null);
+        }
+
         /// <summary>Error text if the extract destination is not acceptable, else null.</summary>
         public static string CheckDestination(string dest)
         {
