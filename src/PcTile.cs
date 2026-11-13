@@ -42,8 +42,15 @@ namespace LabReset
         int percent;
         string detail = "";
         readonly ToolTip tip = new ToolTip();
+        readonly string tooltip;
 
         public event EventHandler TickToggled;
+        /// <summary>The ⏻ button was clicked, or the tile was right-clicked. Location = where to show the menu.</summary>
+        public event MouseEventHandler PowerMenuRequested;
+        bool powerHover;
+
+        // the small ⏻ button in the top-right corner
+        Rectangle PowerRect { get { return new Rectangle(Width - 23, 3, 19, 19); } }
 
         public PcTile(string pc, string number, string tooltip)
         {
@@ -55,6 +62,7 @@ namespace LabReset
             Margin = new Padding(6);
             Cursor = Cursors.Hand;
             BackColor = Color.Transparent;
+            this.tooltip = tooltip;
             tip.SetToolTip(this, tooltip);
             AnimTick += OnAnim;
         }
@@ -84,12 +92,47 @@ namespace LabReset
         }
 
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnClick(EventArgs e)
+        protected override void OnMouseLeave(EventArgs e) { hover = false; powerHover = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnMouseMove(MouseEventArgs e)
         {
-            base.OnClick(e);
+            bool over = PowerRect.Contains(e.Location);
+            if (over != powerHover)
+            {
+                powerHover = over;
+                tip.SetToolTip(this, over ? "Shut down / restart this PC" : tooltip);
+                Invalidate();
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (e.Button == MouseButtons.Right || (e.Button == MouseButtons.Left && PowerRect.Contains(e.Location)))
+            {
+                MouseEventHandler p = PowerMenuRequested;
+                if (p != null) p(this, new MouseEventArgs(e.Button, 1, e.Button == MouseButtons.Right ? e.X : PowerRect.Left, e.Button == MouseButtons.Right ? e.Y : PowerRect.Bottom, 0));
+                return;
+            }
+            if (e.Button != MouseButtons.Left) return;
             EventHandler h = TickToggled;
             if (h != null) h(this, EventArgs.Empty);
+        }
+
+        void DrawPowerButton(Graphics g)
+        {
+            Rectangle r = PowerRect;
+            if (powerHover)
+                using (GraphicsPath bp = Round(r, 5))
+                using (var b = new SolidBrush(Color.FromArgb(253, 228, 228))) g.FillPath(b, bp);
+            Color c = powerHover ? CError : Color.FromArgb(120, 128, 140);
+            float cx = r.Left + r.Width / 2f, cy = r.Top + r.Height / 2f + 0.5f, rad = 5.5f;
+            using (var p = new Pen(c, 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            {
+                g.DrawArc(p, cx - rad, cy - rad, rad * 2, rad * 2, -55, 290);   // ring with a gap at the top
+                g.DrawLine(p, cx, cy - rad - 1.5f, cx, cy - 1);                 // the stroke through the gap
+            }
         }
 
         static GraphicsPath Round(RectangleF r, float rad)
@@ -177,6 +220,9 @@ namespace LabReset
             if (!ticked)
                 using (GraphicsPath cp = Round(card, 8))
                 using (var b = new SolidBrush(Color.FromArgb(150, 255, 255, 255))) g.FillPath(b, cp);
+
+            // ⏻ stays clear even on unticked PCs - it works on that one PC whether it's ticked or not
+            DrawPowerButton(g);
         }
 
         void DrawScreen(Graphics g, RectangleF s)

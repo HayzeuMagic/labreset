@@ -1,9 +1,10 @@
 # Lab Reset
 
-Lab Reset is a small Windows app for resetting the lab VMs at the end of a class. It works on the teacher PC and on the other lab PCs over the network. It does two things:
+Lab Reset is a small Windows app for resetting the lab VMs at the end of a class. It works on the teacher PC and on the other lab PCs over the network. It does three things:
 
 - **Extract** fresh copies of the lab VM archives (for example `Forti.7z` or `PaloAltoVM.7z`).
 - **Delete** the VMs that students extracted.
+- **Shut down or restart** all or some of the lab PCs.
 
 Every PC keeps its VMs in a folder called **`__RivanVMs`**. That folder can be on any drive (`C:\__RivanVMs`, `D:\__RivanVMs`, and so on), and the app finds it on each PC by itself. The app **only ever extracts and deletes inside `__RivanVMs`**. It never deletes the archives themselves.
 
@@ -259,6 +260,25 @@ If **no archive is ticked**, Lab Reset offers to delete the VMs of **all** archi
 When it's finished, the tiles turn green and the status says how many items were deleted:
 
 ![Delete finished on all reachable PCs](docs/images/10-delete-done.png)
+
+### Step 11 (optional): Shut down or restart the lab PCs
+
+The shutdown buttons are under the PC tiles (section 4).
+
+**Several PCs (or the whole lab):**
+
+1. Tick the PCs (section 2 or click the tiles). Use **Tick all** to do the whole lab.
+2. Set **Warn students for ... seconds** (default 30). The lab PCs show a warning message for that long. `0` means no warning.
+3. Click **⏻ Shut down ticked PCs...** or **↻ Restart ticked PCs...**, check the confirm window, then click **Yes**.
+4. Changed your mind? Click **Cancel shutdown** before the warning runs out.
+
+**Just one PC:** click the small **⏻** in the top-right corner of its tile (or right-click the tile) and choose **Shut down**, **Restart** or **Cancel shutdown**. This works whether the PC is ticked or not, and the other tiles are left as they are.
+
+If **This PC** (the teacher PC) is ticked, Lab Reset asks whether to shut it down too. If you say yes, it goes last, after all the lab PCs.
+
+> ⚠️ Open programs on the lab PCs (including VMware) are closed **without saving**.
+
+This uses the same admin access as Extract and Delete, so if **Test connection** says OK, shutdown works too. A PC that is already off shows a red tile.
 
 ---
 

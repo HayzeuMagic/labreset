@@ -29,6 +29,9 @@ namespace LabReset
         Label lblZipFolder, lblStatus, lblTileSummary;
         TextBox txtPcAdd, txtLog;
         Button btnStop;
+        NumericUpDown numShutdownDelay;
+        ContextMenuStrip tileMenu;
+        string menuPc;
         ProgressBar progress;
         FlowLayoutPanel tilePanel;
         readonly Dictionary<string, PcTile> tiles = new Dictionary<string, PcTile>(StringComparer.OrdinalIgnoreCase);
@@ -155,7 +158,19 @@ namespace LabReset
             tilePanel = new FlowLayoutPanel { AutoScroll = true, BackColor = Color.FromArgb(244, 246, 249), Padding = new Padding(6) };
             lblTileSummary = new Label { Height = 20, AutoEllipsis = true, ForeColor = SystemColors.GrayText,
                 Text = "Click a PC to tick or untick it.   Blue = working,  green = done,  red = problem,  gray = skipped." };
-            var gTiles = Group("4. Lab PCs", tilePanel, new Control[] { lblTileSummary }, null);
+            numShutdownDelay = new NumericUpDown { Minimum = 0, Maximum = 600, Value = 30, Width = 55, Margin = new Padding(3, 5, 3, 0) };
+            busyDisabled.Add(numShutdownDelay);
+            var btnShutdown = Btn("⏻  Shut down ticked PCs...", (s, e) => Power_Click(false, CheckedPcs(), true));
+            btnShutdown.ForeColor = Color.DarkRed;
+            var powerRow = Row(btnShutdown, Btn("↻  Restart ticked PCs...", (s, e) => Power_Click(true, CheckedPcs(), true)),
+                               Btn("Cancel shutdown", (s, e) => CancelShutdown(CheckedPcs())),
+                               Lbl("Warn students for"), numShutdownDelay, Lbl("seconds"));
+            powerRow.Padding = new Padding(0, 6, 0, 0);
+            var gTiles = Group("4. Lab PCs", tilePanel, new Control[] { lblTileSummary }, new Control[] { powerRow });
+            tileMenu = new ContextMenuStrip();
+            tileMenu.Items.Add("⏻  Shut down this PC...", null, (s, e) => Power_Click(false, new List<string> { menuPc }, false));
+            tileMenu.Items.Add("↻  Restart this PC...", null, (s, e) => Power_Click(true, new List<string> { menuPc }, false));
+            tileMenu.Items.Add("Cancel shutdown", null, (s, e) => CancelShutdown(new List<string> { menuPc }));
 
             // ---- status
             progress = new ProgressBar { Height = 16 };
@@ -669,6 +684,15 @@ namespace LabReset
                 foreach (ListViewItem i in lvPcs.Items)
                     if (string.Equals((string)i.Tag, pc, StringComparison.OrdinalIgnoreCase)) i.Checked = !i.Checked;
             };
+            // the ⏻ button on the tile (or a right-click anywhere on it) opens Shut down / Restart / Cancel for that one PC
+            t.PowerMenuRequested += (s, e) =>
+            {
+                if (busy) return;
+                menuPc = pc;
+                tileMenu.Items[0].Text = "⏻  Shut down " + label + "...";
+                tileMenu.Items[1].Text = "↻  Restart " + label + "...";
+                tileMenu.Show(t, e.Location);
+            };
             tiles[pc] = t;
             tilePanel.Controls.Add(t);
             // keep the tiles in PC-number order
@@ -835,6 +859,107 @@ namespace LabReset
             catch (OperationCanceledException) { Logger.Write("Test stopped."); }
             finally { EndBusy("Connection test finished: " + ok + " of " + pcs.Count + " PC(s) ready."); }
             Logger.Write("=== TEST finished: " + ok + " of " + pcs.Count + " PC(s) ready.");
+        }
+
+        // ------------------------------------------------------------------ shut down / restart
+        /// <summary>Shuts down / restarts pcs. ticked = true when pcs are the ticked PCs (vs. one PC from its tile's ⏻ menu).</summary>
+        async void Power_Click(bool restart, List<string> pcs, bool ticked)
+        {
+            if (busy) return;
+            string verb = restart ? "Restart" : "Shut down", verbing = restart ? "Restarting" : "Shutting down";
+            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2 or click the PC tiles)."); return; }
+            int delay = (int)numShutdownDelay.Value;
+
+            // This PC (the teacher PC) is only included if the teacher says so, and always goes last
+            bool self = pcs.Any(PcNames.IsLocal);
+            pcs = pcs.Where(p => !PcNames.IsLocal(p)).ToList();
+            if (self && ticked)
+            {
+                DialogResult r = MessageBox.Show(this, "'This PC' (the teacher PC you're using now) is ticked.\n\n" + verb + " this PC too, after the lab PCs?\n\n" +
+                                                 "Yes = this PC too (Lab Reset will close)\nNo = only the lab PCs", "Lab Reset",
+                                                 MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (r == DialogResult.Cancel) return;
+                self = r == DialogResult.Yes;
+            }
+            if (pcs.Count == 0 && !self) { Msg("No lab PCs are ticked."); return; }
+
+            var sb = new StringBuilder();
+            if (pcs.Count == 1 && !self) sb.AppendFormat("{0} {1}?\n\n", verb, PcNames.Display(pcs[0]));
+            else if (pcs.Count == 0) sb.AppendFormat("{0} THIS PC (the teacher PC you're using now)?\nLab Reset will close.\n\n", verb);
+            else
+            {
+                sb.AppendFormat("{0} {1} PC(s)?\n\n", verb, pcs.Count + (self ? 1 : 0));
+                sb.AppendLine("PCs: " + string.Join(", ", pcs.Take(15).Select(PcNames.Number)) + (pcs.Count > 15 ? ", ..." : ""));
+                if (self) sb.AppendLine("...and THIS PC (last).");
+            }
+            sb.AppendLine();
+            sb.AppendLine(delay > 0 ? "Students see a " + delay + "-second warning first. Until then you can click 'Cancel shutdown'."
+                                    : "It happens immediately, with no warning.");
+            sb.Append("Open programs (including VMware) are closed WITHOUT saving.");
+            if (MessageBox.Show(this, sb.ToString(), "Confirm " + verb.ToLowerInvariant(), MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                                MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+
+            string message = "This PC will " + (restart ? "restart" : "shut down") + " in " + delay + " seconds (Lab Reset). Save your work now.";
+            if (ticked) ResetTiles(pcs, "Waiting...");   // one PC from its tile: leave the other tiles as they are
+            BeginBusy(verbing + "...", pcs.Count);
+            CancellationToken ct = cts.Token;
+            int ok = 0;
+            Logger.Write("=== " + verb.ToUpperInvariant() + " " + pcs.Count + " PC(s)" + (self ? " + this PC" : "") + ", warning " + delay + "s");
+            try
+            {
+                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 16), pc =>
+                {
+                    string err;
+                    try { err = Power.Send(pc, restart, delay, message); }
+                    catch (Exception ex) { err = ex.Message; }
+                    if (err == null)
+                    {
+                        Interlocked.Increment(ref ok);
+                        SetPcInfo(pc, null, "OK - " + (restart ? "Restarting" : "Shutting down") + (delay > 0 ? " in " + delay + "s" : ""), 100);
+                        Logger.Write("  " + PcNames.Display(pc) + ": " + verb.ToLowerInvariant() + " sent.");
+                    }
+                    else
+                    {
+                        SetPcInfo(pc, null, "Error - " + err);
+                        Logger.Write("  " + PcNames.Display(pc) + ": FAILED - " + err);
+                    }
+                    StepDone();
+                }));
+            }
+            catch (OperationCanceledException) { Logger.Write(verb + " stopped - PCs not yet sent were left on."); self = false; }
+            finally { EndBusy(verb + " sent to " + ok + " of " + pcs.Count + " PC(s)."); }
+            Logger.Write("=== " + verb.ToUpperInvariant() + " sent to " + ok + " of " + pcs.Count + " PC(s).");
+
+            if (self)
+            {
+                string err = Power.Send(PcNames.ThisPc, restart, Math.Max(delay, 10), message);
+                Logger.Write("  This PC: " + (err == null ? verb.ToLowerInvariant() + " sent." : "FAILED - " + err));
+                if (err != null) Msg("This PC could not " + verb.ToLowerInvariant() + ":\n" + err, MessageBoxIcon.Warning);
+            }
+        }
+
+        async void CancelShutdown(List<string> pcs)
+        {
+            if (busy) return;
+            if (pcs.Count == 0) { Msg("Tick the PCs to cancel the shutdown on."); return; }
+            BeginBusy("Cancelling shutdown...", pcs.Count);
+            int ok = 0;
+            Logger.Write("=== CANCEL SHUTDOWN on " + pcs.Count + " PC(s)");
+            try
+            {
+                await Task.Run(() => Parallel.ForEach(pcs, Par(cts.Token, 16), pc =>
+                {
+                    string err;
+                    try { err = Power.Abort(pc); }
+                    catch (Exception ex) { err = ex.Message; }
+                    if (err == null) { Interlocked.Increment(ref ok); SetPcInfo(pc, null, "OK - Shutdown cancelled", 100); }
+                    else SetPcInfo(pc, null, err == "no shutdown was pending" ? "OK - Nothing to cancel" : "Error - " + err, 100);
+                    Logger.Write("  " + PcNames.Display(pc) + ": " + (err ?? "shutdown cancelled."));
+                    StepDone();
+                }));
+            }
+            catch (OperationCanceledException) { }
+            finally { EndBusy("Shutdown cancelled on " + ok + " of " + pcs.Count + " PC(s)."); }
         }
 
         void NetLogin_Click(object sender, EventArgs e)
