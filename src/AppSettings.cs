@@ -19,7 +19,7 @@ namespace LabReset
         public string Destination = @"C:\__RivanVMs";
         public string ScanFolders = @"C:\Users; C:\__RivanVMs";
         public string NetUser = "";
-        public bool OwnFolder = true, CleanFirst = true;
+        public bool OwnFolder = true, CleanFirst = true, OwnCopy = true;
         public int MinMatch = 60;
         public List<KeyValuePair<string, bool>> Pcs = new List<KeyValuePair<string, bool>>();
         public List<string> CheckedZips = new List<string>();
@@ -42,6 +42,7 @@ namespace LabReset
                     case "netuser": s.NetUser = v; break;
                     case "ownfolder": s.OwnFolder = v == "1"; break;
                     case "cleanfirst": s.CleanFirst = v == "1"; break;
+                    case "owncopy": s.OwnCopy = v == "1"; break;
                     case "minmatch": if (int.TryParse(v, out n)) s.MinMatch = Math.Max(10, Math.Min(100, n)); break;
                     case "zip": if (v.Length > 0) s.CheckedZips.Add(v); break;
                     case "pc":
@@ -64,6 +65,7 @@ namespace LabReset
                 "NetUser=" + NetUser,
                 "OwnFolder=" + (OwnFolder ? "1" : "0"),
                 "CleanFirst=" + (CleanFirst ? "1" : "0"),
+                "OwnCopy=" + (OwnCopy ? "1" : "0"),
                 "MinMatch=" + MinMatch
             };
             foreach (string z in CheckedZips) lines.Add("Zip=" + z);

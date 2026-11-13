@@ -21,17 +21,20 @@ namespace LabReset
         readonly AppSettings settings;
         string zipFolder;
 
-        ListView lvZips, lvPcs, lvResults;
-        Label lblZipFolder, lblStatus, lblCount;
+        // Extract options are fixed: each lab PC extracts its own copy, straight into __RivanVMs
+        // (no extra wrapper folder), after removing the old copy.
+        const bool OwnFolder = false, CleanFirst = true;
+
+        ListView lvZips, lvPcs;
+        Label lblZipFolder, lblStatus, lblTileSummary;
         TextBox txtPcAdd, txtLog;
-        NumericUpDown numMatch;
-        CheckBox chkOwnFolder, chkClean;
-        Button btnStop, btnDelete;
+        Button btnStop;
         ProgressBar progress;
+        FlowLayoutPanel tilePanel;
+        readonly Dictionary<string, PcTile> tiles = new Dictionary<string, PcTile>(StringComparer.OrdinalIgnoreCase);
         SplitContainer splitMain, splitLR, splitLeft;
         readonly List<Control> busyDisabled = new List<Control>();
         readonly System.Windows.Forms.Timer uiTimer = new System.Windows.Forms.Timer { Interval = 250 };
-        readonly ResultSorter sorter = new ResultSorter();
 
         CancellationTokenSource cts;
         volatile string statusText = "Ready.";
@@ -45,6 +48,7 @@ namespace LabReset
             settings = AppSettings.Load(settingsFile);
             zipFolder = Path.Combine(appDir, "Library");          // archives are stored inside the app
             SevenZip.ExePath = Path.Combine(appDir, @"7zip\7z.exe"); // bundled 7-Zip for .7z/.rar/.tar.gz
+            RemoteAgent.SourceDir = appDir;                          // LabResetAgent.exe is copied to lab PCs from here
             Net.User = settings.NetUser;
 
             BuildUi();
@@ -131,38 +135,27 @@ namespace LabReset
                                 Btn("Network login...", NetLogin_Click));
             var gPc = Group("2. Lab computers   (tick the PCs to work on)", lvPcs, new Control[] { pcAddRow, pcHint }, new Control[] { pcButtons });
 
-            // ---- 3. Extract
-            chkOwnFolder = new CheckBox { Text = "Put each archive in its own folder (if it doesn't already have one)", AutoSize = true, Margin = new Padding(3, 5, 16, 3) };
-            chkClean = new CheckBox { Text = "Remove the old copy first (clean reset)", AutoSize = true, Margin = new Padding(3, 5, 3, 3) };
+            lvPcs.ItemChecked += (s, e) => SyncTile(e.Item);
+
+            // ---- 3. Extract / delete
             var btnExtract = Btn("Extract ticked archives on ticked PCs", Extract_Click);
             btnExtract.Font = bold;
-            var gExtract = new GroupBox { Text = "3. Extract", Height = 128, Padding = new Padding(8, 4, 8, 4) };
-            Stack(gExtract, null, new Control[] {
-                Row(Lbl("Extracts into the " + VmFolder.Name + " folder on each ticked PC - on whichever drive it is (C:, D:, ...).")),
-                Row(chkOwnFolder, chkClean),
-                Row(btnExtract) }, null);
-
-            // ---- 4. Scan & delete
-            numMatch = new NumericUpDown { Minimum = 10, Maximum = 100, Width = 55, Margin = new Padding(3, 4, 3, 3) };
-            var btnScan = Btn("Scan ticked PCs", Scan_Click);
-            btnScan.Font = bold;
+            btnExtract.ForeColor = Color.FromArgb(20, 90, 190);
+            var btnDelete = Btn("Delete extracted VMs on ticked PCs...", Delete_Click);
+            btnDelete.Font = bold;
+            btnDelete.ForeColor = Color.DarkRed;
             btnStop = Btn("Stop", (s, e) => { if (cts != null) { cts.Cancel(); statusText = "Stopping..."; } }, false);
             btnStop.Enabled = false;
-            var scanRow1 = Row(Lbl("Searches every drive of each ticked PC for its " + VmFolder.Name + " folder.   Minimum match %:"),
-                               numMatch, btnScan, btnStop);
-            lvResults = MakeList(new[] { "PC", "Path", "Type", "From archive", "Match", "Date modified" },
-                                 new[] { 80, 300, 50, 120, 120, 110 });
-            lvResults.ColumnClick += Results_ColumnClick;
-            lvResults.ItemChecked += (s, e) => UpdateCount();
-            lvResults.DoubleClick += (s, e) => { if (lvResults.SelectedItems.Count > 0) ShowInExplorer(((ScanResult)lvResults.SelectedItems[0].Tag).AccessPath); };
-            lblCount = Lbl("");
-            btnDelete = Btn("Delete ticked items...", Delete_Click);
-            btnDelete.ForeColor = Color.DarkRed;
-            btnDelete.Font = bold;
-            var resRow = Row(Btn("Tick all", (s, e) => SetAllChecked(lvResults, true), false),
-                             Btn("Tick none", (s, e) => SetAllChecked(lvResults, false), false), btnDelete, lblCount);
-            var resHint = new Label { Text = "Only things inside " + VmFolder.Name + " are ever deleted (never the archives). Double-click a row to open it.", Height = 18, ForeColor = SystemColors.GrayText };
-            var gScan = Group("4. Find and delete extracted VMs", lvResults, new Control[] { scanRow1 }, new Control[] { resRow, resHint });
+            var gExtract = new GroupBox { Text = "3. Reset the lab", Height = 92, Padding = new Padding(8, 4, 8, 4) };
+            Stack(gExtract, null, new Control[] {
+                Row(Lbl("Each ticked PC uses its own copy of the archive in its " + VmFolder.Name + " folder (C:, D:, ...). Archives are never deleted.")),
+                Row(btnExtract, btnDelete, btnStop) }, null);
+
+            // ---- 4. PC progress tiles
+            tilePanel = new FlowLayoutPanel { AutoScroll = true, BackColor = Color.FromArgb(244, 246, 249), Padding = new Padding(6) };
+            lblTileSummary = new Label { Height = 20, AutoEllipsis = true, ForeColor = SystemColors.GrayText,
+                Text = "Click a PC to tick or untick it.   Blue = working,  green = done,  red = problem,  gray = skipped." };
+            var gTiles = Group("4. Lab PCs", tilePanel, new Control[] { lblTileSummary }, null);
 
             // ---- status
             progress = new ProgressBar { Height = 16 };
@@ -181,7 +174,7 @@ namespace LabReset
             splitLeft.Panel2.Controls.Add(gPc);
             splitLR = new SplitContainer { Dock = DockStyle.Fill };
             splitLR.Panel1.Controls.Add(splitLeft);
-            Stack(splitLR.Panel2, gScan, new Control[] { gExtract }, new Control[] { statusPanel });
+            Stack(splitLR.Panel2, gTiles, new Control[] { gExtract }, new Control[] { statusPanel });
             splitMain = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, Padding = new Padding(4) };
             splitMain.Panel1.Controls.Add(splitLR);
             splitMain.Panel2.Controls.Add(gLog);
@@ -224,9 +217,6 @@ namespace LabReset
         // ================================================================== settings
         void LoadSettingsIntoUi()
         {
-            numMatch.Value = Math.Max(numMatch.Minimum, Math.Min(numMatch.Maximum, settings.MinMatch));
-            chkOwnFolder.Checked = settings.OwnFolder;
-            chkClean.Checked = settings.CleanFirst;
             lblZipFolder.Text = "Library: " + zipFolder;
 
             bool thisPcChecked = true;
@@ -240,9 +230,6 @@ namespace LabReset
         {
             try
             {
-                settings.MinMatch = (int)numMatch.Value;
-                settings.OwnFolder = chkOwnFolder.Checked;
-                settings.CleanFirst = chkClean.Checked;
                 settings.NetUser = Net.User ?? "";
                 settings.CheckedZips = lvZips.CheckedItems.Cast<ListViewItem>().Select(i => i.Text).ToList();
                 settings.Pcs = lvPcs.Items.Cast<ListViewItem>().Select(i => new KeyValuePair<string, bool>((string)i.Tag, i.Checked)).ToList();
@@ -343,6 +330,10 @@ namespace LabReset
             foreach (Control c in busyDisabled) c.Enabled = true;
             btnStop.Enabled = false;
             statusText = text;
+            // PCs that never got their turn (stopped early) stop animating
+            foreach (PcTile t in tiles.Values)
+                if (t.State == TileState.Waiting || t.State == TileState.Working) t.SetState(TileState.Error, -1, "Stopped");
+            UpdateTileSummary();
             progressDone = 0;
             progress.Value = 0;
             UpdateStatus();
@@ -651,8 +642,100 @@ namespace LabReset
             it.SubItems.Add(pc == PcNames.ThisPc ? Environment.MachineName : pc);
             it.SubItems.Add("");
             it.SubItems.Add("");
+            AddTile(pc, isChecked);
             lvPcs.Items.Add(it);
             return it;
+        }
+
+        // ------------------------------------------------------------------ PC tiles
+        static int SortKey(string pc)
+        {
+            if (pc == PcNames.ThisPc) return -1;
+            System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(pc, @"(\d+)$");
+            int n;
+            return m.Success && int.TryParse(m.Groups[1].Value, out n) ? n : int.MaxValue;
+        }
+
+        void AddTile(string pc, bool isChecked)
+        {
+            if (tiles.ContainsKey(pc)) return;
+            string label = pc == PcNames.ThisPc ? "This PC" : PcNames.Number(pc);
+            string tip = pc == PcNames.ThisPc ? "This PC (" + Environment.MachineName + ")" : PcNames.Display(pc);
+            var t = new PcTile(pc, label, tip + "\nClick to tick / untick") { Ticked = isChecked, Font = Font };
+            t.SetState(TileState.Idle, 0, isChecked ? "Ready" : "Not ticked");
+            t.TickToggled += (s, e) =>
+            {
+                if (busy) return;
+                foreach (ListViewItem i in lvPcs.Items)
+                    if (string.Equals((string)i.Tag, pc, StringComparison.OrdinalIgnoreCase)) i.Checked = !i.Checked;
+            };
+            tiles[pc] = t;
+            tilePanel.Controls.Add(t);
+            // keep the tiles in PC-number order
+            var ordered = tiles.Values.OrderBy(x => SortKey(x.Pc)).ThenBy(x => x.Pc, StringComparer.OrdinalIgnoreCase).ToList();
+            for (int i = 0; i < ordered.Count; i++) tilePanel.Controls.SetChildIndex(ordered[i], i);
+        }
+
+        void RemoveTile(string pc)
+        {
+            PcTile t;
+            if (!tiles.TryGetValue(pc, out t)) return;
+            tiles.Remove(pc);
+            tilePanel.Controls.Remove(t);
+            t.Dispose();
+        }
+
+        void SyncTile(ListViewItem item)
+        {
+            PcTile t;
+            if (item == null || !tiles.TryGetValue((string)item.Tag, out t)) return;
+            t.Ticked = item.Checked;
+            if (t.State == TileState.Idle) t.SetState(TileState.Idle, 0, item.Checked ? "Ready" : "Not ticked");
+            UpdateTileSummary();
+        }
+
+        /// <summary>Puts every ticked PC's tile in "waiting" at the start of a job; unticked ones go back to idle.</summary>
+        void ResetTiles(List<string> pcs, string text)
+        {
+            var set = new HashSet<string>(pcs, StringComparer.OrdinalIgnoreCase);
+            foreach (PcTile t in tiles.Values)
+            {
+                if (set.Contains(t.Pc)) t.SetState(TileState.Waiting, 0, text);
+                else t.SetState(TileState.Idle, 0, t.Ticked ? "Ready" : "Not ticked");
+            }
+            UpdateTileSummary();
+        }
+
+        static TileState StateFor(string status)
+        {
+            if (status.StartsWith("OK")) return TileState.Done;
+            if (status.StartsWith("Working")) return TileState.Working;
+            if (status.StartsWith("Waiting")) return TileState.Waiting;
+            if (status.StartsWith("Unreachable") || status.StartsWith("No ") || status.StartsWith("Online, but")) return TileState.Skipped;
+            return TileState.Error;
+        }
+
+        static string ShortStatus(string status)
+        {
+            foreach (string pre in new[] { "OK - ", "Working - ", "Error - " })
+                if (status.StartsWith(pre)) return status.Substring(pre.Length);
+            if (status.StartsWith("Unreachable")) return "Off / unreachable";
+            if (status.StartsWith("Online, but")) return "No admin access";
+            if (status.StartsWith("No " + VmFolder.Name)) return "No " + VmFolder.Name + " folder";
+            return status;
+        }
+
+        void UpdateTileSummary()
+        {
+            if (lblTileSummary == null) return;
+            var ticked = tiles.Values.Where(t => t.Ticked).ToList();
+            int done = tiles.Values.Count(t => t.State == TileState.Done), work = tiles.Values.Count(t => t.State == TileState.Working),
+                wait = tiles.Values.Count(t => t.State == TileState.Waiting),
+                bad = tiles.Values.Count(t => t.State == TileState.Error), skip = tiles.Values.Count(t => t.State == TileState.Skipped);
+            if (done + work + wait + bad + skip == 0)
+                lblTileSummary.Text = ticked.Count + " of " + tiles.Count + " PC(s) ticked.   Click a PC to tick or untick it.   Blue = working,  green = done,  red = problem,  gray = off/skipped.";
+            else
+                lblTileSummary.Text = string.Format("{0} done   {1} working   {2} waiting   {3} problem   {4} off/skipped", done, work, wait, bad, skip);
         }
 
         List<string> CheckedPcs()
@@ -660,7 +743,8 @@ namespace LabReset
             return lvPcs.CheckedItems.Cast<ListViewItem>().Select(i => (string)i.Tag).ToList();
         }
 
-        void SetPcInfo(string pc, string folders, string status)
+        /// <summary>Updates a PC's row and tile. pct = progress 0-100 (or -1 to keep the current value).</summary>
+        void SetPcInfo(string pc, string folders, string status, int pct = -1)
         {
             UI(() =>
             {
@@ -671,8 +755,15 @@ namespace LabReset
                     if (status != null)
                     {
                         i.SubItems[3].Text = status;
-                        i.ForeColor = status.StartsWith("OK") ? Color.DarkGreen : status.StartsWith("Working") ? SystemColors.WindowText : Color.Firebrick;
+                        i.ForeColor = status.StartsWith("OK") ? Color.DarkGreen : status.StartsWith("Working") || status.StartsWith("Waiting") ? SystemColors.WindowText : Color.Firebrick;
                     }
+                }
+                PcTile t;
+                if (status != null && tiles.TryGetValue(pc, out t))
+                {
+                    TileState st = StateFor(status);
+                    t.SetState(st, st == TileState.Done ? 100 : pct, ShortStatus(status));
+                    UpdateTileSummary();
                 }
             });
         }
@@ -703,7 +794,8 @@ namespace LabReset
         {
             var items = lvPcs.SelectedItems.Cast<ListViewItem>().Where(i => (string)i.Tag != PcNames.ThisPc).ToList();
             if (items.Count == 0) { Msg("Click a PC to select it (hold Ctrl or Shift for several), then click Remove.\n'This PC' can't be removed - just untick it."); return; }
-            foreach (ListViewItem i in items) lvPcs.Items.Remove(i);
+            foreach (ListViewItem i in items) { RemoveTile((string)i.Tag); lvPcs.Items.Remove(i); }
+            UpdateTileSummary();
             SaveSettings();
         }
 
@@ -717,7 +809,8 @@ namespace LabReset
             int ok = 0;
             try
             {
-                foreach (string pc in pcs) SetPcInfo(pc, "", "Working...");
+                ResetTiles(pcs, "Waiting...");
+                foreach (string pc in pcs) SetPcInfo(pc, "", "Working - testing...");
                 await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 16), pc =>
                 {
                     string r, folders = "";
@@ -807,7 +900,7 @@ namespace LabReset
                 SetPcInfo(pc, null, "No " + VmFolder.Name + " folder on any drive");
                 return null;
             }
-            SetPcInfo(pc, null, "Working...");
+            SetPcInfo(pc, null, "Working - connected", 0);
             return folders;
         }
 
@@ -817,33 +910,34 @@ namespace LabReset
             List<ZipSignature> zips = CheckedZips();
             if (zips.Count == 0) { Msg("Tick the archives you want to extract (section 1)."); return; }
             List<string> pcs = CheckedPcs();
-            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2)."); return; }
-            bool own = chkOwnFolder.Checked, clean = chkClean.Checked;
+            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2 or click the PC tiles)."); return; }
 
             var sbq = new StringBuilder();
             sbq.AppendLine("Extract " + zips.Count + " archive(s) on " + pcs.Count + " PC(s)?\n");
             sbq.AppendLine("PCs: " + string.Join(", ", pcs.Take(15).Select(PcNames.Number)) + (pcs.Count > 15 ? ", ..." : ""));
             sbq.AppendLine();
             foreach (ZipSignature z in zips.Take(12))
-                sbq.AppendLine("  " + z.FileName + "  ->  " + FileOps.ResultFolder(z, @"X:\" + VmFolder.Name, own).Replace(@"X:\", @"?:\"));
+                sbq.AppendLine("  " + z.FileName + "  ->  " + FileOps.ResultFolder(z, @"X:\" + VmFolder.Name, OwnFolder).Replace(@"X:\", @"?:\"));
             if (zips.Count > 12) sbq.AppendLine("  ...and " + (zips.Count - 12) + " more");
             sbq.AppendLine();
-            sbq.AppendLine("?: is the drive where each PC has its " + VmFolder.Name + " folder.");
-            sbq.Append(clean ? "Old copies are removed first (clean reset)." : "Files with the same name are overwritten.");
-            sbq.Append("\nVMware must be closed on those PCs.");
+            sbq.AppendLine("Each PC extracts its own copy of the archive in its " + VmFolder.Name + " folder (?: = the drive it is on).");
+            sbq.AppendLine("The old copy is removed first. A PC that doesn't have the archive is skipped.");
+            sbq.Append("VMware must be closed on those PCs.");
             if (MessageBox.Show(this, sbq.ToString(), "Confirm extract", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
             SaveSettings();
+            ResetTiles(pcs, "Waiting...");
             BeginBusy("Extracting...", pcs.Count * zips.Count * 100);
             CancellationToken ct = cts.Token;
             List<string> tree = ProtectTree();
             int ok = 0, failed = 0, skipped = 0;
-            Logger.Write("=== EXTRACT " + zips.Count + " archive(s) on " + pcs.Count + " PC(s)");
+            Logger.Write("=== EXTRACT " + zips.Count + " archive(s) on " + pcs.Count + " PC(s) - each PC extracts its own copy");
             try
             {
-                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 4), pc =>
+                // Each PC extracts on its own disk, so all PCs can run at the same time.
+                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 32), pc =>
                 {
-                    string name = PcNames.Display(pc);
+                    string name = PcNames.Display(pc), num = PcNames.Number(pc);
                     List<string> folders = PreparePc(pc, ct);
                     if (folders == null)
                     {
@@ -851,35 +945,96 @@ namespace LabReset
                         Interlocked.Add(ref progressDone, zips.Count * 100);
                         return;
                     }
-                    string dest = folders[0];
-                    int pcFailed = 0;
+
+                    // which archives does this PC have in its own __RivanVMs folder?
+                    var present = new List<ZipSignature>();
+                    int missing = 0;
                     foreach (ZipSignature z in zips)
                     {
-                        ct.ThrowIfCancellationRequested();
-                        int reported = 0;
-                        statusText = "Extracting " + z.FileName + " on " + PcNames.Number(pc) + "...";
-                        try
+                        bool has = folders.Any(f =>
                         {
-                            int n = FileOps.ExtractArchive(z, pc, dest, own, clean, tree, Logger.Write, pct =>
-                            {
-                                pct = Math.Max(0, Math.Min(100, pct));
-                                if (pct > reported) { Interlocked.Add(ref progressDone, pct - reported); reported = pct; }
-                                statusText = "Extracting " + z.FileName + " on " + PcNames.Number(pc) + "...  " + pct + "%";
-                            }, ct);
-                            Logger.Write("Extracted " + z.FileName + " -> " + name + "  " + FileOps.ResultFolder(z, dest, own) + "  (" + n + " files)");
-                            Interlocked.Increment(ref ok);
-                        }
-                        catch (OperationCanceledException) { throw; }
-                        catch (Exception ex)
-                        {
-                            Interlocked.Increment(ref failed);
-                            pcFailed++;
-                            Logger.Write("FAILED extracting " + z.FileName + " on " + name + ": " + ex.Message +
-                                         (ex is IOException ? "  (is the VM still open, or is the disk full?)" : ""));
-                        }
-                        Interlocked.Add(ref progressDone, 100 - reported);
+                            try { return File.Exists(Path.Combine(Paths.ToAccess(pc, f), z.FileName)); }
+                            catch { return false; }
+                        });
+                        if (has) { present.Add(z); continue; }
+                        missing++;
+                        Interlocked.Increment(ref failed);
+                        Interlocked.Add(ref progressDone, 100);
+                        Logger.Write("MISSING on " + name + ": " + z.FileName + " is not in its " + VmFolder.Name + " folder (" +
+                                     string.Join(", ", folders) + ") - not extracted.");
                     }
-                    SetPcInfo(pc, null, pcFailed == 0 ? "OK - extracted" : "Extract had errors - see log");
+                    if (present.Count == 0) { SetPcInfo(pc, null, "Error - Archive missing", 100); return; }
+
+                    int total = present.Count * 100, reportedAll = 0, lastPct = -1;
+                    Action<string, int, int, int> report = (archive, idx, cnt, pct) =>
+                    {
+                        pct = Math.Max(0, Math.Min(100, pct));
+                        int done = Math.Min(total, (idx - 1) * 100 + pct);
+                        if (done > reportedAll) { Interlocked.Add(ref progressDone, done - reportedAll); reportedAll = done; }
+                        int pcPct = done * 100 / total;
+                        statusText = num + ": extracting " + archive + " (" + idx + "/" + cnt + ")  " + pct + "%";
+                        if (pcPct != lastPct)
+                        {
+                            lastPct = pcPct;
+                            SetPcInfo(pc, null, "Working - " + archive + " " + pct + "%", pcPct);
+                        }
+                    };
+
+                    try
+                    {
+                        if (!PcNames.IsLocal(pc))
+                        {
+                            // ---- the lab PC extracts its own copy (nothing big crosses the network)
+                            SetPcInfo(pc, null, "Working - starting...", 0);
+                            AgentResult res = RemoteAgent.RunExtract(pc, present.Select(z => z.FileName).ToList(), OwnFolder, CleanFirst,
+                                report, line => Logger.Write(num + " agent: " + line), ct);
+                            Interlocked.Add(ref ok, res.Ok);
+                            Interlocked.Add(ref failed, res.Failed);
+                            if (res.State == "Failed") Logger.Write("FAILED on " + name + ": " + res.Message);
+                            SetPcInfo(pc, null, res.Failed == 0 && missing == 0 ? "OK - Done" : "Error - see log", 100);
+                        }
+                        else
+                        {
+                            // ---- this PC: extract right here, next to the archive
+                            int pcFailed = 0;
+                            for (int n = 0; n < present.Count; n++)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                ZipSignature z = present[n];
+                                int idx = n + 1;
+                                string dest = folders.FirstOrDefault(f => File.Exists(Path.Combine(f, z.FileName))) ?? folders[0];
+                                report(z.FileName, idx, present.Count, 0);
+                                try
+                                {
+                                    int files = FileOps.ExtractArchive(z, pc, dest, OwnFolder, CleanFirst, tree, Logger.Write,
+                                                                       pct => report(z.FileName, idx, present.Count, pct), ct);
+                                    Logger.Write("Extracted " + z.FileName + " -> " + name + "  " + FileOps.ResultFolder(z, dest, OwnFolder) + "  (" + files + " files)");
+                                    Interlocked.Increment(ref ok);
+                                }
+                                catch (OperationCanceledException) { throw; }
+                                catch (Exception ex)
+                                {
+                                    Interlocked.Increment(ref failed);
+                                    pcFailed++;
+                                    Logger.Write("FAILED extracting " + z.FileName + " on " + name + ": " + ex.Message +
+                                                 (ex is IOException ? "  (is the VM still open, or is the disk full?)" : ""));
+                                }
+                                report(z.FileName, idx, present.Count, 100);
+                            }
+                            SetPcInfo(pc, null, pcFailed == 0 && missing == 0 ? "OK - Done" : "Error - see log", 100);
+                        }
+                    }
+                    catch (OperationCanceledException) { SetPcInfo(pc, null, "Stopped"); throw; }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Add(ref failed, present.Count);
+                        Logger.Write("FAILED on " + name + ": " + ex.Message);
+                        SetPcInfo(pc, null, "Error - " + ex.Message);
+                    }
+                    finally
+                    {
+                        Interlocked.Add(ref progressDone, Math.Max(0, total - reportedAll));
+                    }
                 }), ct);
             }
             catch (OperationCanceledException) { Logger.Write("Extract stopped by user."); }
@@ -892,190 +1047,116 @@ namespace LabReset
             }
         }
 
-        // ================================================================== 4. scan
-        async void Scan_Click(object sender, EventArgs e)
+        // ================================================================== 3. delete
+        /// <summary>
+        /// Deletes the extracted copies of the ticked archives on the ticked PCs: for each archive, the items it
+        /// extracts into __RivanVMs (e.g. D:\__RivanVMs\Forti). Archives themselves are never deleted.
+        /// </summary>
+        async void Delete_Click(object sender, EventArgs e)
         {
             List<ZipSignature> zips = CheckedZips();
             if (zips.Count == 0)
             {
                 zips = AllZips();
-                if (zips.Count == 0) { Msg("Import your lab archives first (section 1)."); return; }
-                Logger.Write("No archives ticked - looking for VMs from all " + zips.Count + " archive(s).");
+                if (zips.Count == 0) { Msg("There are no archives in the list (section 1)."); return; }
+                if (MessageBox.Show(this, "No archives are ticked.\n\nDelete the extracted VMs of ALL " + zips.Count + " archives on the ticked PCs?",
+                                    "Lab Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             }
             List<string> pcs = CheckedPcs();
-            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2)."); return; }
+            if (pcs.Count == 0) { Msg("Tick at least one PC (section 2 or click the PC tiles)."); return; }
 
-            SaveSettings();
-            lvResults.Items.Clear();
-            UpdateCount();
-            int min = (int)numMatch.Value;
-            List<string> tree = ProtectTree();
-            BeginBusy("Scanning...", pcs.Count);
+            // what each archive leaves in __RivanVMs when extracted (never an archive file)
+            var targets = zips.SelectMany(z => z.TopNames).Where(t => !ZipSignature.IsArchive(t))
+                              .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
+
+            var sb = new StringBuilder();
+            sb.AppendFormat("Permanently delete the extracted VMs of {0} archive(s) on {1} PC(s)?\n\n", zips.Count, pcs.Count);
+            sb.AppendLine("PCs: " + string.Join(", ", pcs.Take(15).Select(PcNames.Number)) + (pcs.Count > 15 ? ", ..." : ""));
+            sb.AppendLine();
+            foreach (string t in targets.Take(12)) sb.AppendLine(@"  ?:\" + VmFolder.Name + @"\" + t);
+            if (targets.Count > 12) sb.AppendLine("  ...and " + (targets.Count - 12) + " more");
+            sb.Append("\nThe archives are kept. Deleted VMs do NOT go to the Recycle Bin.\nVMware must be closed on those PCs.");
+            if (MessageBox.Show(this, sb.ToString(), "Confirm delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            ResetTiles(pcs, "Waiting...");
+            BeginBusy("Deleting...", pcs.Count * 100);
             CancellationToken ct = cts.Token;
-            int found = 0, skipped = 0;
-            Logger.Write(string.Format("=== SCAN {0} PC(s) for VMs from {1} archive(s) (minimum match {2}%)", pcs.Count, zips.Count, min));
+            List<string> tree = ProtectTree();
+            int deleted = 0, failed = 0, skipped = 0;
+            Logger.Write("=== DELETE extracted VMs of " + zips.Count + " archive(s) on " + pcs.Count + " PC(s)");
             try
             {
-                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 8), pc =>
+                await Task.Run(() => Parallel.ForEach(pcs, Par(ct, 16), pc =>
                 {
-                    string name = PcNames.Display(pc);
+                    string name = PcNames.Display(pc), num = PcNames.Number(pc);
+                    int reported = 0;
                     try
                     {
                         List<string> folders = PreparePc(pc, ct);
                         if (folders == null) { Interlocked.Increment(ref skipped); return; }
-                        var sc = new Scanner(pc, zips, min, tree, folders, ct);
-                        sc.Found = r => UI(() => AddResult(r));
-                        sc.Status = p => statusText = "Scanning " + PcNames.Number(pc) + ":  " + p;
-                        sc.Log = Logger.Write;
-                        sc.Run(folders);
-                        Interlocked.Add(ref found, sc.ItemsFound);
-                        Logger.Write(string.Format("Scanned {0} [{1}]: {2} item(s) found{3}.", name, string.Join(", ", folders), sc.ItemsFound,
-                            sc.FoldersUnreadable > 0 ? ", " + sc.FoldersUnreadable + " folder(s) could not be read" : ""));
-                        SetPcInfo(pc, null, "OK - scanned, " + sc.ItemsFound + " found");
+
+                        var items = new List<string>();
+                        foreach (string f in folders)
+                            foreach (string t in targets)
+                            {
+                                string local = Path.Combine(f, t);
+                                try { if (FileOps.Exists(Paths.ToAccess(pc, local))) items.Add(local); } catch { }
+                            }
+                        if (items.Count == 0)
+                        {
+                            Logger.Write(name + ": nothing to delete.");
+                            SetPcInfo(pc, null, "OK - Nothing to delete", 100);
+                            return;
+                        }
+
+                        int pcFailed = 0;
+                        for (int n = 0; n < items.Count; n++)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            string local = items[n];
+                            SetPcInfo(pc, null, "Working - deleting " + Path.GetFileName(local), n * 100 / items.Count);
+                            statusText = num + ": deleting " + local;
+                            string why = Safety.WhyNotDeletable(local, PcNames.IsLocal(pc) ? tree : null);
+                            if (why != null)
+                                Logger.Write("SKIPPED (protected: " + why + ") " + name + "  " + local);
+                            else
+                            {
+                                try
+                                {
+                                    FileOps.DeletePath(Paths.ToAccess(pc, local));
+                                    Interlocked.Increment(ref deleted);
+                                    Logger.Write("Deleted " + name + "  " + local);
+                                }
+                                catch (Exception ex)
+                                {
+                                    pcFailed++;
+                                    Interlocked.Increment(ref failed);
+                                    Logger.Write("FAILED to delete " + name + "  " + local + ": " + ex.Message +
+                                                 (ex is IOException ? "  (is the VM still open on that PC?)" : ""));
+                                }
+                            }
+                            int pct = (n + 1) * 100 / items.Count;
+                            Interlocked.Add(ref progressDone, pct - reported);
+                            reported = pct;
+                        }
+                        SetPcInfo(pc, null, pcFailed == 0 ? "OK - Deleted" : "Error - " + pcFailed + " not deleted, see log", 100);
                     }
-                    catch (OperationCanceledException) { throw; }
+                    catch (OperationCanceledException) { SetPcInfo(pc, null, "Stopped"); throw; }
                     catch (Exception ex)
                     {
-                        Logger.Write("ERROR scanning " + name + ": " + ex.Message);
+                        Interlocked.Increment(ref failed);
+                        Logger.Write("ERROR on " + name + ": " + ex.Message);
                         SetPcInfo(pc, null, "Error - " + ex.Message);
                     }
-                    finally { StepDone(); }
-                }), ct);
-            }
-            catch (OperationCanceledException) { Logger.Write("Scan stopped by user."); }
-            catch (AggregateException ax) { Logger.Write("Scan error: " + ax.InnerException.Message); }
-            finally
-            {
-                string summary = "Scan finished: " + found + " item(s) found" + (skipped > 0 ? ", " + skipped + " PC(s) skipped" : "") + ".";
-                Logger.Write("=== " + summary);
-                EndBusy(summary);
-            }
-        }
-
-        void AddResult(ScanResult r)
-        {
-            var it = new ListViewItem(PcNames.Number(r.Computer)) { Tag = r };
-            it.SubItems.Add(r.LocalPath);
-            it.SubItems.Add(r.IsFolder ? "Folder" : "File");
-            it.SubItems.Add(r.ZipName);
-            it.SubItems.Add(r.Percent + "%  (" + r.Matched + "/" + r.Checked + " files)");
-            it.SubItems.Add(r.Modified == DateTime.MinValue ? "" : r.Modified.ToString("yyyy-MM-dd HH:mm"));
-            if (r.Percent < 90) it.ForeColor = Color.DarkGoldenrod;
-            lvResults.Items.Add(it);
-            UpdateCount();
-        }
-
-        void UpdateCount()
-        {
-            lblCount.Text = lvResults.Items.Count + " found,  " + lvResults.CheckedItems.Count + " ticked";
-        }
-
-        class ResultSorter : System.Collections.IComparer
-        {
-            public int Column;
-            public bool Descending;
-            public int Compare(object x, object y)
-            {
-                var a = (ListViewItem)x;
-                var b = (ListViewItem)y;
-                var ra = (ScanResult)a.Tag;
-                var rb = (ScanResult)b.Tag;
-                int r;
-                if (Column == 4) r = ra.Percent.CompareTo(rb.Percent);
-                else if (Column == 5) r = ra.Modified.CompareTo(rb.Modified);
-                else r = string.Compare(a.SubItems[Column].Text, b.SubItems[Column].Text, StringComparison.OrdinalIgnoreCase);
-                return Descending ? -r : r;
-            }
-        }
-
-        void Results_ColumnClick(object sender, ColumnClickEventArgs e)
-        {
-            if (sorter.Column == e.Column) sorter.Descending = !sorter.Descending;
-            else { sorter.Column = e.Column; sorter.Descending = false; }
-            lvResults.ListViewItemSorter = sorter;
-            lvResults.Sort();
-        }
-
-        // ================================================================== 4. delete
-        async void Delete_Click(object sender, EventArgs e)
-        {
-            List<ListViewItem> items = lvResults.CheckedItems.Cast<ListViewItem>().ToList();
-            if (items.Count == 0) { Msg("Tick the items you want to delete first."); return; }
-            List<ScanResult> results = items.Select(i => (ScanResult)i.Tag).ToList();
-            var pcList = results.Select(r => r.Computer).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-
-            var sb = new StringBuilder();
-            sb.AppendFormat("Permanently delete {0} item(s) on {1} PC(s)?\n\n", results.Count, pcList.Count);
-            foreach (ScanResult r in results.Take(12)) sb.AppendLine("  " + PcNames.Number(r.Computer) + "   " + r.LocalPath);
-            if (results.Count > 12) sb.AppendLine("  ...and " + (results.Count - 12) + " more");
-            sb.Append("\nDeleted files do NOT go to the Recycle Bin. This cannot be undone.");
-            if (MessageBox.Show(this, sb.ToString(), "Confirm delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-                return;
-
-            BeginBusy("Deleting...", results.Count);
-            CancellationToken ct = cts.Token;
-            List<string> tree = ProtectTree();
-            var deleted = new ConcurrentBag<ScanResult>();
-            int failed = 0, skipped = 0;
-            Logger.Write("=== DELETE " + results.Count + " item(s) on " + pcList.Count + " PC(s)");
-            try
-            {
-                var groups = results.GroupBy(r => r.Computer, StringComparer.OrdinalIgnoreCase).ToList();
-                await Task.Run(() => Parallel.ForEach(groups, Par(ct, 8), g =>
-                {
-                    string pc = g.Key, name = PcNames.Display(pc);
-                    string err = Net.CheckAccess(pc);
-                    if (err != null)
-                    {
-                        Logger.Write("UNREACHABLE " + name + ": " + err + "  (" + g.Count() + " item(s) not deleted)");
-                        Interlocked.Add(ref failed, g.Count());
-                        Interlocked.Add(ref progressDone, g.Count());
-                        return;
-                    }
-                    foreach (ScanResult r in g)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        statusText = "Deleting on " + PcNames.Number(pc) + ":  " + r.LocalPath;
-                        string why = Safety.WhyNotDeletable(r.LocalPath, PcNames.IsLocal(pc) ? tree : null);
-                        if (why != null)
-                        {
-                            Interlocked.Increment(ref skipped);
-                            Logger.Write("SKIPPED (protected: " + why + ") " + name + "  " + r.LocalPath);
-                        }
-                        else
-                        {
-                            string access = Paths.ToAccess(pc, r.LocalPath);
-                            try
-                            {
-                                if (!FileOps.Exists(access)) Logger.Write("Already gone: " + name + "  " + r.LocalPath);
-                                else
-                                {
-                                    FileOps.DeletePath(access);
-                                    Logger.Write("Deleted " + name + "  " + r.LocalPath);
-                                }
-                                deleted.Add(r);
-                            }
-                            catch (Exception ex)
-                            {
-                                Interlocked.Increment(ref failed);
-                                Logger.Write("FAILED to delete " + name + "  " + r.LocalPath + ": " + ex.Message +
-                                             (ex is IOException ? "  (is the VM still open on that PC?)" : ""));
-                            }
-                        }
-                        StepDone();
-                    }
+                    finally { Interlocked.Add(ref progressDone, 100 - reported); }
                 }), ct);
             }
             catch (OperationCanceledException) { Logger.Write("Delete stopped by user."); }
             catch (AggregateException ax) { Logger.Write("Delete error: " + ax.InnerException.Message); }
             finally
             {
-                var gone = new HashSet<ScanResult>(deleted);
-                lvResults.BeginUpdate();
-                foreach (ListViewItem i in items) if (gone.Contains((ScanResult)i.Tag)) lvResults.Items.Remove(i);
-                lvResults.EndUpdate();
-                UpdateCount();
-                string summary = "Delete finished: " + gone.Count + " deleted, " + failed + " failed, " + skipped + " skipped (protected).";
+                string summary = "Delete finished: " + deleted + " item(s) deleted, " + failed + " failed, " + skipped + " PC(s) skipped.";
                 Logger.Write("=== " + summary);
                 EndBusy(summary);
             }

@@ -5,6 +5,7 @@ Library/*
 
 # Built on each PC with build.bat
 LabReset.exe
+LabResetAgent.exe
 
 # Per-PC files
 Logs/
