@@ -139,11 +139,14 @@ Other buttons in this section:
 
 ### Step 3: Add the lab PCs by IP address
 
-In **section 2 (Lab computers)**, type the lab PCs' IP addresses into the **IP address** box, then click **Add**.
+**The lab's PCs are already built in.** The first time Lab Reset opens, the list is filled with PC 11, 12, 21, 22, 31, 32, 41, 42, 51, 52, 61, 62, 71, 72, 81, 82, 91 and 92 (`10.3.3.111` to `10.3.3.192`). If some are missing (for example on a PC that already had a saved list), click **Add lab PCs**.
+
+To add another PC, type it into the **PC or IP** box in **section 2 (Lab computers)**, then click **Add**.
 
 ![Typing an IP range into the IP address box and clicking Add](docs/images/02-add-ip-addresses.png)
 
-1. Type the IP address(es) in the **IP address** box. You can type:
+1. Type the PC(s) in the **PC or IP** box. You can type:
+   - **just the PC number:** `62` adds `10.3.3.162`, and `61, 62` adds both
    - **one PC:** `10.3.3.162`
    - **several PCs**, separated by commas: `10.3.3.162, 10.3.3.163`
    - **a range** in curly brackets: `10.3.3.{101-110}` adds `10.3.3.101` to `10.3.3.110`
