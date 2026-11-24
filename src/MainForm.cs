@@ -129,8 +129,9 @@ namespace LabReset
             // ---- 2. Lab computers
             txtPcAdd = new TextBox { Width = 200 };
             txtPcAdd.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; AddPcs_Click(s, e); } };
-            var pcAddRow = Row(Lbl("IP address:"), txtPcAdd, Btn("Add", AddPcs_Click));
-            var pcHint = new Label { Text = "e.g. 10.3.3.162 (= PC 62), several: 10.3.3.162, 10.3.3.163   range: 10.3.3.{101-130}", Height = 18, AutoEllipsis = true, ForeColor = SystemColors.GrayText };
+            var pcAddRow = Row(Lbl("PC or IP:"), txtPcAdd, Btn("Add", AddPcs_Click),
+                               Btn("Add lab PCs", (s, e) => { if (AddLabPcs(true) > 0) { UpdateTileSummary(); SaveSettings(); } }));
+            var pcHint = new Label { Text = "PC number: 62 (= 10.3.3.162), several: 61, 62   or a full IP: 10.3.3.162   range: 10.3.3.{101-130}", Height = 18, AutoEllipsis = true, ForeColor = SystemColors.GrayText };
             lvPcs = MakeList(new[] { "PC", "IP address", "VMs folder", "Status" }, new[] { 70, 95, 105, 300 });
             lvPcs.Sorting = SortOrder.Ascending;
             var pcButtons = Row(Btn("Remove", RemovePcs_Click), Btn("Tick all", (s, e) => SetAllChecked(lvPcs, true), false),
@@ -239,6 +240,24 @@ namespace LabReset
             AddPcRow(PcNames.ThisPc, thisPcChecked);
             foreach (var p in settings.Pcs)
                 if (p.Key != PcNames.ThisPc) AddPcRow(p.Key, p.Value);
+
+            // First start (no lab PCs saved yet): fill in the lab's PCs so nobody has to type them
+            if (!settings.Pcs.Any(p => p.Key != PcNames.ThisPc)) AddLabPcs(false);
+        }
+
+        /// <summary>Adds every lab PC (PcNames.LabPcNumbers) that isn't in the list yet. Returns how many were added.</summary>
+        int AddLabPcs(bool log)
+        {
+            int added = 0;
+            foreach (string ip in PcNames.LabPcs())
+            {
+                if (PcNames.IsLocal(ip)) continue; // the teacher PC is already "This PC"
+                if (lvPcs.Items.Cast<ListViewItem>().Any(i => string.Equals((string)i.Tag, ip, StringComparison.OrdinalIgnoreCase))) continue;
+                AddPcRow(ip, true);
+                added++;
+            }
+            if (log) Logger.Write(added > 0 ? "Added " + added + " lab PC(s)." : "All lab PCs are already in the list.");
+            return added;
         }
 
         void SaveSettings()
@@ -811,7 +830,7 @@ namespace LabReset
                 txtPcAdd.Clear();
                 SaveSettings();
             }
-            else if (errors.Count == 0 && names.Count == 0) Msg("Type an IP address first, e.g. 10.3.3.162");
+            else if (errors.Count == 0 && names.Count == 0) Msg("Type a PC number or IP address first, e.g. 62 or 10.3.3.162");
         }
 
         void RemovePcs_Click(object sender, EventArgs e)

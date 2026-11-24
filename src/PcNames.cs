@@ -17,6 +17,16 @@ namespace LabReset
     {
         public const string ThisPc = "(This PC)";
 
+        /// <summary>The lab's IPs start with this, followed by the 2-digit PC number (PC 62 = 10.3.3.162).</summary>
+        public const string LabPrefix = "10.3.3.1";
+
+        /// <summary>The PC numbers in the lab. Used to fill the list on first start and by "Add lab PCs".</summary>
+        public static readonly int[] LabPcNumbers = { 11, 12, 21, 22, 31, 32, 41, 42, 51, 52, 61, 62, 71, 72, 81, 82, 91, 92 };
+
+        public static string LabIp(int number) { return LabPrefix + number.ToString("00"); }
+
+        public static List<string> LabPcs() { return LabPcNumbers.Select(LabIp).ToList(); }
+
         static readonly Regex Valid = new Regex(@"^[A-Za-z0-9][A-Za-z0-9\-_.]{0,62}$");
         static readonly Regex Range = new Regex(@"^(.*?)\{(\d{1,6})-(\d{1,6})\}(.*)$");
 
@@ -89,6 +99,10 @@ namespace LabReset
                         names.Add(m.Groups[1].Value + i.ToString().PadLeft(pad, '0') + m.Groups[4].Value);
                 }
                 else names.Add(tok);
+
+                // A bare 1-2 digit PC number (62, or a range {11-92}) means that lab PC: 62 -> 10.3.3.162
+                for (int k = 0; k < names.Count; k++)
+                    if (Regex.IsMatch(names[k], @"^\d{1,2}$")) names[k] = LabIp(int.Parse(names[k]));
 
                 foreach (string raw2 in names)
                 {
