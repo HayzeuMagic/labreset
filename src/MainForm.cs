@@ -130,7 +130,8 @@ namespace LabReset
             txtPcAdd = new TextBox { Width = 200 };
             txtPcAdd.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; AddPcs_Click(s, e); } };
             var pcAddRow = Row(Lbl("PC or IP:"), txtPcAdd, Btn("Add", AddPcs_Click),
-                               Btn("Add lab PCs", (s, e) => { if (AddLabPcs(true) > 0) { UpdateTileSummary(); SaveSettings(); } }));
+                               Btn("Add lab PCs", (s, e) => { if (AddLabPcs(true) > 0) { UpdateTileSummary(); SaveSettings(); } }),
+                               Btn("Scan network...", ScanNetwork_Click));
             var pcHint = new Label { Text = "PC number: 62 (= 10.3.3.162), several: 61, 62   or a full IP: 10.3.3.162   range: 10.3.3.{101-130}", Height = 18, AutoEllipsis = true, ForeColor = SystemColors.GrayText };
             lvPcs = MakeList(new[] { "PC", "IP address", "VMs folder", "Status" }, new[] { 70, 95, 105, 300 });
             lvPcs.Sorting = SortOrder.Ascending;
@@ -831,6 +832,24 @@ namespace LabReset
                 SaveSettings();
             }
             else if (errors.Count == 0 && names.Count == 0) Msg("Type a PC number or IP address first, e.g. 62 or 10.3.3.162");
+        }
+
+        /// <summary>Finds the PCs that are switched on in the network (e.g. another floor's) and adds the ones the teacher ticks.</summary>
+        void ScanNetwork_Click(object sender, EventArgs e)
+        {
+            var pcs = lvPcs.Items.Cast<ListViewItem>().Select(i => (string)i.Tag).ToList();
+            using (var f = new ScanForm(pcs, settings.ScanRange, Font))
+            {
+                DialogResult r = f.ShowDialog(this);
+                settings.ScanRange = f.Range;
+                if (r == DialogResult.OK && f.Selected.Count > 0)
+                {
+                    foreach (string ip in f.Selected) AddPcRow(ip, true);
+                    Logger.Write("Added " + f.Selected.Count + " PC(s) found by the network scan. Click 'Test connection' to check Lab Reset can reach them.");
+                    UpdateTileSummary();
+                }
+                SaveSettings();
+            }
         }
 
         void RemovePcs_Click(object sender, EventArgs e)

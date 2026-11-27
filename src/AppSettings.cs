@@ -19,6 +19,7 @@ namespace LabReset
         public string Destination = @"C:\__RivanVMs";
         public string ScanFolders = @"C:\Users; C:\__RivanVMs";
         public string NetUser = "";
+        public string ScanRange = "";
         public bool OwnFolder = true, CleanFirst = true, OwnCopy = true;
         public int MinMatch = 60;
         public List<KeyValuePair<string, bool>> Pcs = new List<KeyValuePair<string, bool>>();
@@ -40,6 +41,7 @@ namespace LabReset
                     case "destination": s.Destination = v; break;
                     case "scanfolders": s.ScanFolders = v; break;
                     case "netuser": s.NetUser = v; break;
+                    case "scanrange": s.ScanRange = v; break;
                     case "ownfolder": s.OwnFolder = v == "1"; break;
                     case "cleanfirst": s.CleanFirst = v == "1"; break;
                     case "owncopy": s.OwnCopy = v == "1"; break;
@@ -63,6 +65,7 @@ namespace LabReset
                 "Destination=" + Destination,
                 "ScanFolders=" + ScanFolders,
                 "NetUser=" + NetUser,
+                "ScanRange=" + ScanRange,
                 "OwnFolder=" + (OwnFolder ? "1" : "0"),
                 "CleanFirst=" + (CleanFirst ? "1" : "0"),
                 "OwnCopy=" + (OwnCopy ? "1" : "0"),

@@ -156,6 +156,22 @@ The **PC number is the last 2 digits of the IP**, so `10.3.3.162` shows up as **
 
 You only have to add the PCs once. The list is saved and comes back the next time you open Lab Reset.
 
+#### Don't know the IP addresses? Click "Scan network..."
+
+Use this for PCs whose IP addresses you don't know, for example the PCs on another floor.
+
+1. In **section 2 (Lab computers)**, click **Scan network...**. A window opens and starts scanning **this PC's own network** straight away (for example `10.3.3.0/24`, which means `10.3.3.1` to `10.3.3.254`). It takes about 20 seconds.
+2. Every device that is switched on appears in the list, with its **Windows computer name** when it gives one. That makes it easy to tell which PCs are on the other floor.
+3. PCs with **file sharing on** are ticked for you, because Lab Reset can most likely reach them. Devices in orange (ping only or "network only") may be printers, phones or PCs whose firewall isn't set up yet ([Part 2](#part-2-prepare-the-lab-pcs-once), step 2). PCs that are already in your list are grey.
+4. Tick or untick PCs, then click **Add ticked PCs to the list**.
+5. Click **Test connection** to check them. You can then shut them down like any other PC ([Step 11](#step-11-optional-shut-down-or-restart-the-lab-pcs)).
+
+If the other floor uses **different addresses** (for example `10.3.4.x`), type them in the **Addresses** box and click **Scan**. You can type `10.3.4.0/24`, `10.3.4.1-254`, `10.3.4.{100-199}`, or several separated by commas (`10.3.3.0/24, 10.3.4.0/24`). The box remembers what you scanned last; **This PC's network** puts the default back.
+
+PCs whose address isn't a lab address (`10.3.3.1xx`) are shown by their full IP address (for example `10.3.3.211` or `10.3.4.62`), so they can't be mixed up with the lab's PC 11, PC 62 and so on.
+
+> The PCs must be **switched on** to be found. A PC that is off can't be found, but it doesn't need shutting down either.
+
 ---
 
 ### Step 4: Tick the PCs you want to work on

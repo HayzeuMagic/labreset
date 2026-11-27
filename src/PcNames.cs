@@ -62,11 +62,19 @@ namespace LabReset
             return Regex.IsMatch(s, @"^\d{1,3}(\.\d{1,3}){3}$") && System.Net.IPAddress.TryParse(s, out ip);
         }
 
-        /// <summary>The PC number: last 2 digits of the IP address (10.3.3.162 -> "PC 62"), or the digits at the end of a name.</summary>
+        /// <summary>
+        /// The PC number: last 2 digits of a lab IP address (10.3.3.162 -> "PC 62"), or the digits at the end of a name.
+        /// Other IP addresses (e.g. another floor's 10.3.3.211 or 10.3.4.62) are shown in full, so they can't be mixed up with lab PCs.
+        /// </summary>
         public static string Number(string pc)
         {
             if (pc == ThisPc) return "This PC";
-            if (IsIPv4(pc)) return "PC " + (int.Parse(pc.Substring(pc.LastIndexOf('.') + 1)) % 100).ToString("00");
+            if (IsIPv4(pc))
+            {
+                int last = int.Parse(pc.Substring(pc.LastIndexOf('.') + 1));
+                string prefix = LabPrefix.Substring(0, LabPrefix.LastIndexOf('.') + 1);
+                return pc.StartsWith(prefix) && last >= 100 && last <= 199 ? "PC " + (last % 100).ToString("00") : pc;
+            }
             Match m = Regex.Match(pc, @"(\d+)$");
             return m.Success ? "PC " + m.Groups[1].Value : pc;
         }
@@ -75,7 +83,8 @@ namespace LabReset
         public static string Display(string pc)
         {
             if (pc == ThisPc || (IsLocal(pc) && !IsIPv4(pc))) return "This PC (" + Environment.MachineName + ")";
-            return Number(pc) + " (" + pc + ")";
+            string n = Number(pc);
+            return n == pc ? pc : n + " (" + pc + ")";
         }
 
         /// <summary>Expands "LAB-PC{01-30}, ROOM2-5" into individual names.</summary>
